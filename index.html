@@ -5,9 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>slate — Pre-production</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232B2F33'/%3E%3Cg fill='%23E8E6E0'%3E%3Cg transform='rotate(-10 8 22)'%3E%3Cpolygon points='8,14 22,14 18,22 8,22'/%3E%3Cpolygon points='27,14 39,14 35,22 23,22'/%3E%3Cpolygon points='44,14 56,14 56,22 40,22'/%3E%3C/g%3E%3Cpath d='M8 28.5a2.5 2.5 0 0 1 2.5-2.5h43a2.5 2.5 0 0 1 2.5 2.5V35H8z'/%3E%3Cpath d='M8 37h48v16.5a2.5 2.5 0 0 1-2.5 2.5h-43A2.5 2.5 0 0 1 8 53.5z'/%3E%3C/g%3E%3C/svg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=Schibsted+Grotesk:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="vendor/fonts.css">
 <style>
 /* slate brand: Slate #2B2F33 ink, Chalk #E8E6E0, Marker #E3B341 for highlights only (never as text on light).
    Schibsted Grotesk for the interface; screenplay data stays in Courier Prime. */
@@ -1938,9 +1936,9 @@ function exportScript(f) {
   if (f === 'pdf') { V.script = 'pages'; render(); toast('Choose "Save as PDF" in the print dialog'); setTimeout(() => window.print(), 400); }
 }
 // PDF import: read each line's position on the page to tell action, character, dialogue and transitions apart.
-const loadScript = src => new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('could not load the PDF reader (are you online?)')); document.head.append(s); });
+const loadScript = src => new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('could not load the PDF reader')); document.head.append(s); });
 async function pdfToText(file) {
-  const base = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+  const base = 'vendor/';
   if (!window.pdfjsLib) await loadScript(base + 'pdf.min.js');
   pdfjsLib.GlobalWorkerOptions.workerSrc = base + 'pdf.worker.min.js';
   const doc = await pdfjsLib.getDocument({data: await file.arrayBuffer()}).promise, blocks = [];

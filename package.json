@@ -1,0 +1,25 @@
+{
+  "name": "slate",
+  "productName": "Slate",
+  "version": "1.0.0",
+  "description": "Film pre-production: screenplay, breakdown, schedule and call sheets",
+  "author": "thaddeuswill",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win"
+  },
+  "build": {
+    "appId": "com.thaddeuswill.slate",
+    "productName": "Slate",
+    "files": ["main.js", "index.html", "vendor/**/*", "build/icon.png"],
+    "directories": { "output": "dist" },
+    "win": { "target": ["nsis", "portable"], "icon": "build/icon.png" },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true },
+    "portable": { "artifactName": "Slate-${version}-portable.exe" }
+  },
+  "devDependencies": {
+    "electron": "^45.2.2",
+    "electron-builder": "^26.18.0"
+  }
+}
