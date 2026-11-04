@@ -159,10 +159,16 @@ td input[data-k=num]{font-family:var(--mono);font-weight:700}
 .strip{border-radius:3px;padding:var(--s2);margin-bottom:var(--s1);cursor:grab;color:#111;font-size:var(--fs-1);border-left:6px solid #0003}
 .strip span{display:block;opacity:.7}
 .strip.dragging{opacity:.35}
+.stripcols{position:relative}.stripcols summary{cursor:pointer;color:var(--muted);font-size:var(--fs-1)}
+.stripcols[open]>label{display:flex;align-items:center;gap:6px;font-size:var(--fs-1)}.stripcols input[type=color]{width:32px;height:22px;padding:0;border:none;background:none}
+.col .flags{margin:2px 0 6px}.holds{margin:0 0 8px}
+.mat td{text-align:center;min-width:48px}.mat th{font-size:var(--fs-1)}
+.sets tr.lunch td{font-style:italic;color:var(--muted)}
 .col{transition:border-color .12s,background .12s}
 .col.over{border-color:var(--accent);background:var(--soft)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.int-d{background:#f2f0ea}.ext-d{background:#f3e27a}.int-n{background:#8fb3e8}.ext-n{background:#93cf95}
+.int-d{background:var(--int-d,#f2f0ea)}.ext-d{background:var(--ext-d,#f3e27a)}.int-n{background:var(--int-n,#8fb3e8)}.ext-n{background:var(--ext-n,#93cf95)}
+.flags{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0}.flag{font-size:var(--fs-1);line-height:1.6;padding:0 8px;border-radius:999px;background:#f6e7d8;color:#7a3e10}
 .sheet{background:#fff;color:#111;padding:var(--s5);border:1px solid var(--line);border-radius:var(--r);max-width:900px}
 .sheet table{margin:var(--s2) 0 var(--s3);min-width:0}
 .sheet tr+tr td{border-top:none}.sheet th{color:#555;border-color:#ccc}.sheet td{border-bottom:1px solid #eee;padding:var(--s1)}
@@ -184,6 +190,10 @@ td textarea:focus{background:var(--panel);border-color:var(--accent)}
 table.rep{min-width:0;max-width:640px}
 .frames{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:var(--s3);margin:var(--s2) 0 var(--s5)}
 .frame{margin:0}
+.fimg{position:relative;display:block}
+.guide{position:absolute;inset:0;border-radius:8px;pointer-events:none;box-shadow:inset 0 0 0 1px #fff6;
+  background:linear-gradient(90deg,#0000 calc(33.33% - .5px),#fffb 0 calc(33.33% + .5px),#0000 0 calc(66.67% - .5px),#fffb 0 calc(66.67% + .5px),#0000 0),
+  linear-gradient(#0000 calc(33.33% - .5px),#fffb 0 calc(33.33% + .5px),#0000 0 calc(66.67% - .5px),#fffb 0 calc(66.67% + .5px),#0000 0)}
 .frame img,.frame .ph{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:8px;background:#eceef2}
 .frame .ph{border:1px dashed var(--line);color:var(--muted)}
 .frame figcaption{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap;padding-top:var(--s1)}
@@ -205,7 +215,7 @@ table.rep{min-width:0;max-width:640px}
 .page{position:relative;width:8.5in;min-height:11in;padding:1in 1in 1in 1.5in;color:#111;font:12pt/12pt var(--mono);box-shadow:0 1px 2px #0000001a,0 4px 16px #0000000d;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .phead{position:absolute;top:.5in;left:1.5in;right:1in;display:flex;justify-content:space-between}
 .el{position:relative;white-space:pre-wrap;min-height:12pt}
-.el.char{margin-left:22ch}.el.dial{margin-left:10ch;width:35ch}.el.paren{margin-left:16ch;width:25ch}.el.trans{text-align:right}
+.el.char,.el.more{margin-left:22ch}.el.dial{margin-left:10ch;width:35ch}.el.paren{margin-left:16ch;width:25ch}.el.trans{text-align:right}
 .sn{position:absolute}.sn.l{left:-8ch}.sn.r{right:-8ch}
 .chg::after{content:'*';position:absolute;right:-6ch;top:0}
 .page[data-wm]::before{content:attr(data-wm);position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transform:rotate(-35deg);font:700 44pt var(--mono);color:#0000001a;pointer-events:none;text-align:center}
@@ -940,27 +950,80 @@ function lineInfo() {
   const map = lcsMap(L.lines.map(x => x.t), lines);
   return lines.map((t, i) => map[i] >= 0 ? {id: L.lines[map[i]].id, rev: L.lines[map[i]].rev, changed: false} : {id: 'n' + i, rev: L.rev, changed: true});
 }
+// A speech that won't fit splits at a sentence: the part that fits, and the rest. [null] when it can't split cleanly.
+function splitSpeech(t, room) {
+  t = t.trim();
+  let a = '';
+  for (const part of t.match(/[^.!?]+[.!?]+["'’”)\]]*\s*|[^.!?]+$/g) || [t]) { if (wrap(plain(a + part), WIDTH.dial) > room) break; a += part; }
+  a = a.trim();
+  return a && a.length < t.length ? [a, t.slice(a.length).trim()] : [null];
+}
+console.assert(splitSpeech('One two. ' + 'word '.repeat(20), 1)[0] === 'One two.' && splitSpeech('No sentence break ' + 'word '.repeat(20), 1)[0] === null, 'splitSpeech');
 // Locked pages keep their numbers: each starts at its anchor line, and overflow becomes 12A, 12B.
+// Page breaks follow the usual rules: a heading keeps what follows, a cue keeps two lines of its speech,
+// a long speech splits with (MORE) and the cue again with (CONT'D), and a transition never starts a page.
 function paginate(els, info, anchors) {
   const pages = [];
-  let page = null, base = '1', letter = 0;
+  let page = null, base = '1', letter = 0, speaker = '';
   const open = label => pages.push(page = {label, els: [], rows: 0, firstSrc: -1, rev: 0, cur: false});
-  els.forEach((e, k) => {
-    if (e.type === 'pagebreak') { if (page?.els.length) open(anchors ? base + String.fromCharCode(65 + letter++) : String(pages.length + 1)); return; }
-    const id = e.src >= 0 ? info[e.src].id : null, anchor = anchors && id ? anchors.get(id) : null;
-    const need = e.rows + (e.type === 'scene' ? (els[k + 1]?.rows || 0) + (els[k + 2]?.rows || 0) : e.type === 'char' ? els[k + 1]?.rows || 0 : 0);
-    if (!page) { base = anchor || '1'; open(base); }
-    else if (anchor && page.els.length) { base = anchor; letter = 0; open(anchor); }
-    else if (page.rows + need > PER_PAGE && page.els.length) open(anchors ? base + String.fromCharCode(65 + letter++) : String(pages.length + 1));
-    if (e.type === 'blank' && !page.els.length) return;
+  const turn = () => open(anchors ? base + String.fromCharCode(65 + letter++) : String(pages.length + 1));
+  const put = e => {
     if (page.firstSrc < 0 && e.src >= 0) page.firstSrc = e.src;
     const infs = (e.parts ? e.parts.flat() : [e]).filter(x => x.src >= 0).map(x => info[x.src]);
     e.changed = e.type !== 'blank' && infs.some(x => x.changed);
     if (e.type !== 'blank') page.rev = Math.max(page.rev, ...infs.map(x => x.rev));
     page.cur ||= e.changed;
     page.els.push(e); page.rows += e.rows;
+  };
+  // Rows that must come along with a cue or parenthetical: any parenthetical, then two lines of speech.
+  const lead = j => els[j]?.type === 'dial' ? Math.min(els[j].rows, 2) : els[j]?.type === 'paren' ? els[j].rows + lead(j + 1) : 0;
+  els.forEach((e0, k) => {
+    let e = e0;
+    if (e.type === 'pagebreak') { if (page?.els.length) turn(); return; }
+    if (e.type === 'char') speaker = noContd(e.text).trim();
+    const id = e.src >= 0 ? info[e.src].id : null, anchor = anchors && id ? anchors.get(id) : null;
+    const need = e.rows + (e.type === 'scene' ? (els[k + 1]?.rows || 0) + (els[k + 2]?.rows || 0) : e.type === 'char' || e.type === 'paren' ? lead(k + 1) : 0);
+    if (!page) { base = anchor || '1'; open(base); }
+    else if (anchor && page.els.length) { base = anchor; letter = 0; open(anchor); }
+    else if (page.rows + need > PER_PAGE && page.els.length) {
+      const room = PER_PAGE - page.rows - 1, cut = e.type === 'dial' && room >= 2 && speaker ? splitSpeech(e.text, room) : [null];
+      if (cut[0]) {
+        put({...e, text: cut[0], rows: wrap(plain(cut[0]), WIDTH.dial)});
+        put({type: 'more', text: '(MORE)', scene: e.scene, src: -1, rows: 1});
+        turn();
+        put({type: 'char', text: speaker + " (CONT'D)", scene: e.scene, src: -1, rows: 1});
+        e = {...e, text: cut[1], rows: wrap(plain(cut[1]), WIDTH.dial)};
+      } else {
+        turn();
+        if (e.type === 'trans') {
+          const prev = pages[pages.length - 2];
+          let j = prev.els.length - 1;
+          while (j > 0 && prev.els[j].type === 'blank') j--;
+          while (j > 1 && prev.els[j].type !== 'char' && ['dial', 'paren', 'char'].includes(prev.els[j - 1].type)) j--; // keep a speech whole
+          if (j > 0) { const moved = prev.els.splice(j); prev.rows -= moved.reduce((a, x) => a + x.rows, 0); moved.forEach(put); }
+        }
+      }
+    }
+    if (e.type === 'blank' && !page.els.length) return;
+    put(e);
   });
   return pages;
+}
+// Shots the writer already called in the action ("CLOSE ON the letter", "INSERT - PHONE", "SARAH'S POV").
+const SHOT_CALLS = [
+  [/^(?:EXTREME CLOSE[- ]?UP|EXTREME CLOSE ON|ECU)\b/, 'ECU'], [/^(?:CLOSE[- ]?UP|CLOSE ON|CLOSER ON|CU)\b/, 'CU'], [/^(?:MEDIUM CLOSE|MCU)\b/, 'MCU'],
+  [/^(?:MEDIUM SHOT|MEDIUM ON|MS)\b/, 'MS'], [/^(?:EXTREME WIDE|EWS)\b/, 'EWS'], [/^(?:WIDE SHOT|WIDE ON|WIDE|WS|ESTABLISHING)\b/, 'WS'],
+  [/^INSERT\b/, 'INSERT'], [/^(?:POV\b|[A-Z][A-Z'’ ]*'S POV\b)/, 'POV'], [/^(?:OVER THE SHOULDER|OTS)\b/, 'OTS'],
+  [/^(?:ANGLE ON|NEW ANGLE|REVERSE ANGLE|REVERSE ON)\b/, 'MS'], [/^(?:AERIAL|OVERHEAD|BIRD'S[- ]EYE)\b/, 'WS', 'High'], [/^(?:TRACKING|MOVING SHOT|DOLLY)\b/, 'MS', '', 'Tracking'],
+];
+function shotCalls() {
+  const out = [];
+  formatScript(S.script).forEach(e => {
+    if (!e.scene || !['action', 'char', 'trans', 'center'].includes(e.type)) return;
+    const t = plain(e.text).trim(), call = SHOT_CALLS.find(([re]) => re.test(t));
+    if (call) out.push({scene: e.scene, size: call[1], angle: call[2] || '', move: call[3] || '', desc: (t.charAt(0) + t.slice(1).toLowerCase()).replace(/[:\s]+$/, '').replace(/\bpov\b/g, 'POV')});
+  });
+  return out;
 }
 const layout = () => paginate(formatScript(S.script), lineInfo(), S.lock && new Map(S.lock.anchors));
 
@@ -1001,7 +1064,7 @@ const fld = (c, it, k, attrs = '') => `<input data-c="${c}" data-i="${it.id}" da
 const area = (c, it, k) => `<textarea data-c="${c}" data-i="${it.id}" data-k="${k}" aria-label="${LABELS[k]}" rows="2">${esc(it[k])}</textarea>`;
 const opts = (list, val, none) => `<option value="">${none}</option>` + list.map(([v, l]) => `<option value="${v}" ${v === val ? 'selected' : ''}>${esc(l)}</option>`).join('');
 // View toggles (list/boards, screenplay/AV, ...) are UI state, not project data.
-const V = {script: 'screenplay', shots: 'list', bd: 'scene', size: 240, wm: '', notes: false, noteCats: {D: true, W: true, G: true}, ref: null, tw: false, raw: false, zoom: 'fit', auto: true, autoEl: true, find: false, cmp: null, map: 'auto'};
+const V = {tts: (() => { try { return localStorage.getItem('slate-tts') || 'system'; } catch { return 'system'; } })(), script: 'screenplay', shots: 'list', bd: 'scene', size: 240, wm: '', notes: false, noteCats: {D: true, W: true, G: true}, ref: null, tw: false, raw: false, zoom: 'fit', auto: true, autoEl: true, find: false, cmp: null, map: 'auto'};
 let focus = new Set(), note = '';
 const castName = n => S.people.find(p => p.type === 'cast' && String(p.num) === String(n))?.role || '';
 // Highlight a scene's tagged words on the page, colored by category.
@@ -1046,6 +1109,39 @@ const del = (c, it) => `<button class="x" data-act="del" data-c="${c}" data-i="$
 const heading = s => `${s.ie ? s.ie + '. ' : ''}${s.loc}${s.tod ? ' - ' + s.tod : ''}`;
 const castOf = s => String(s.cast || '').split(/[,\s]+/).filter(Boolean);
 const stripCls = s => (/^EXT/.test(s.ie) ? 'ext' : 'int') + (/NIGHT|DUSK/.test(s.tod) ? '-n' : '-d');
+const STRIP_COLORS = {'int-d': ['INT day', '#f2f0ea'], 'ext-d': ['EXT day', '#f3e27a'], 'int-n': ['INT night', '#8fb3e8'], 'ext-n': ['EXT night', '#93cf95']};
+const stripVars = () => Object.keys(STRIP_COLORS).map(k => S.strips?.[k] ? `--${k}:${S.strips[k]}` : '').filter(Boolean).join(';');
+const baseLoc = s => String(s.loc || '').split(/\s+[-–—]\s+|\s*\/\s*/)[0].trim().toUpperCase();
+const isNight = s => /NIGHT|DUSK|EVENING/.test(s.tod);
+const dayTarget = () => +S.dayTarget || 5;
+// What an AD would warn about on a shoot day. Advice only: nothing is blocked.
+function dayHealth(i) {
+  const sc = dayScenes(S.days[i].id), w = [];
+  if (!sc.length) return w;
+  if (sc.reduce((a, s) => a + (+s.pages || 0), 0) > dayTarget() * 8) w.push(`Over ${dayTarget()} pages`);
+  const sets = new Set(sc.map(baseLoc)); if (sets.size > 1) w.push(`${sets.size - 1} company move${sets.size > 2 ? 's' : ''}`);
+  if (sc.some(isNight) && sc.some(s => !isNight(s))) w.push('Day and night');
+  if (i > 0 && dayScenes(S.days[i - 1].id).some(isNight) && sc.some(s => !isNight(s))) w.push('Short turnaround after nights');
+  return w;
+}
+// Cast paid to wait: days between someone's first and last work day that they don't work.
+function holdDays() {
+  const work = new Map();
+  S.days.forEach((d, i) => dayScenes(d.id).flatMap(castOf).forEach(n => { if (!work.has(n)) work.set(n, new Set()); work.get(n).add(i); }));
+  return [...work].map(([n, set]) => [n, Math.max(...set) - Math.min(...set) + 1 - set.size]).filter(([, h]) => h > 0);
+}
+const toMin = t => { const m = /^(\d{1,2}):(\d{2})/.exec(String(t || '').trim()); return m ? +m[1] * 60 + +m[2] : null; };
+const hhmm = m => { m = ((m % 1440) + 1440) % 1440; return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
+const clock = m => { m = ((m % 1440) + 1440) % 1440; const h = Math.floor(m / 60); return `${h % 12 || 12}:${String(m % 60).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
+// A rough running order from one call time: an hour to set up, each scene by its length, lunch six hours in.
+function dayPlan(d, scenes) {
+  const call = toMin(d.call); if (call == null) return null;
+  const per = +S?.minPerPage || 60, rows = [];
+  let t = call + 60, ate = false;
+  scenes.forEach(s => { if (!ate && t >= call + 360) { rows.push({lunch: true, at: t}); t += 30; ate = true; } rows.push({s, at: t}); t += Math.round((+s.pages || 0) / 8 * per); });
+  return {rows, wrap: t + 30};
+}
+console.assert(dayPlan({call: '07:00'}, [{pages: 8}]).wrap === 7 * 60 + 60 + 60 + 30 && clock(13 * 60 + 5) === '1:05 PM', 'dayPlan');
 const dayScenes = id => S.scenes.filter(s => (s.day || null) === id).sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || byNum(a, b));
 
 /* ───────────── Screenplay editor ─────────────
@@ -1178,26 +1274,47 @@ const tagName = s => s.replace(/\s+/g, ' ').trim().toLowerCase().replace(/(^|\s)
 // A stunt is listed by what happens ("Tackle", "Fall"), whoever does it and however the line conjugates it.
 const STUNT_BASE = {fell: 'fall', leapt: 'leap', thrown: 'throw', throws: 'throw', stabbed: 'stab', fighting: 'fight', chased: 'chase', shoved: 'shove', tackled: 'tackle', kicked: 'kick', punched: 'punch', crashed: 'crash'};
 const stuntName = w => { const x = w.toLowerCase().split(' ')[0]; return tagName(STUNT_BASE[x] || x.replace(/(ches|shes|sses)$/, m => m.slice(0, -2)).replace(/(?<=[^s])s$/, '')); };
-// What each department needs from one scene's action text: [{item, cat}], one entry per item.
-function detectElements(text, castNames = new Set()) {
-  const found = new Map(), add = (item, cat) => { const key = item.toLowerCase(); if (item.length > 1 && !found.has(key) && !castNames.has(item.toUpperCase())) found.set(key, {item: tagName(item), cat}); };
+const CAMERA_WORDS = /^(CLOSER?(?: ON)?|CLOSE-UP|EXTREME CLOSE(?:-UP| ON)?|INSERT|POV|ANGLE ON|NEW ANGLE|REVERSE(?: ANGLE| ON)?|WIDE(?: SHOT| ON)?|ECU|CU|MCU|MS|WS|EWS|OTS|AERIAL(?: SHOT| VIEW)?|OVERHEAD(?: SHOT)?|TRACKING(?: SHOT)?|ESTABLISHING(?: SHOT)?|BACK TO SCENE|CONTINUOUS|LATER|MOMENTS LATER|SUPER|INTERCUT|FLASHBACK|MONTAGE|SERIES OF SHOTS|THE END|END)$/;
+// Characters introduced in the action with an age ("MARTA (60s)", "TOMÁS, 30") are cast before they ever speak.
+const INTRO = /\b([A-Z][A-Z'’.-]+(?: [A-Z][A-Z'’.-]+){0,2})(?:\s*\((?:(?:early|mid|late)[- ]?)?\d{1,2}s?\b[^)]*\)|,\s*(?:early |mid-?|late )?\d{1,2}s?\b)/g;
+const introsIn = text => [...new Set([...String(text).matchAll(INTRO)].map(m => m[1]).filter(n => n.length > 1 && !/^(INT|EXT|CUT|FADE|DAY|NIGHT|ROOM|APT|UNIT|PAGE|SCENE)$/.test(n)))];
+console.assert(introsIn('MARTA (60s) waits. OLD TOM, 70, sleeps. A ROOM (1999).').join() === 'MARTA,OLD TOM', 'introsIn');
+// The sentence a tag came from, so every auto tag can show why it is there.
+const quoteAt = (t, i) => t.slice(t.lastIndexOf('. ', i) + 1, t.indexOf('. ', i) + 1 || t.length).trim().slice(0, 160);
+// Items tagged by hand in any scene: found again wherever the action mentions them.
+function knownTags() {
+  const map = new Map();
+  S.scenes.forEach(s => ELEMENTS.forEach(([k]) => tagList(s[k]).forEach(x => {
+    if (x.length > 2 && !(s.autoEl?.[k] || []).some(a => sameTag(a, x)) && !map.has(x.toLowerCase())) map.set(x.toLowerCase(), {item: x, cat: k});
+  })));
+  const words = [...map.keys()].sort((a, b) => b.length - a.length).map(x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  return words.length ? {map, re: new RegExp(`\\b(${words.join('|')})\\b`, 'gi')} : null;
+}
+// What each department needs from one scene's action text: [{item, cat, why}], one entry per item.
+function detectElements(text, castNames = new Set(), known = null) {
+  const intros = new Set(introsIn(text));
+  const found = new Map(), add = (item, cat, at = -1, rule = '') => { const key = item.toLowerCase(); if (item.length > 1 && !found.has(key) && !castNames.has(item.toUpperCase()) && !intros.has(item.toUpperCase()))
+    found.set(key, {item: tagName(item), cat, why: (rule ? rule + ': ' : '') + (at >= 0 ? `“${quoteAt(text, at)}”` : '')}); };
   // 1. ALL-CAPS phrases: the screenplay convention for things that matter (and for sounds).
   for (const m of text.matchAll(/\b[A-Z][A-Z0-9'’-]{1,}(?:\s+[A-Z][A-Z0-9'’-]{1,})*\b/g)) {
-    const w = m[0];
-    if (w.length < 3 || /^(INT|EXT|CONT'?D|V\.?O|O\.?S|CUT|FADE|DAY|NIGHT|THE|AND|I|OK|TV)$/.test(w) || castNames.has(w)) continue;
-    const cat = SOUND_CAPS.test(w) ? 'sfx' : (LEXICON.find(([, re]) => { re.lastIndex = 0; return re.test(w.toLowerCase()); }) || ['props'])[0];
-    add(w, cat);
+    const w = m[0].replace(/^(THE|A|AN) (?=\S)/, '');
+    if (CAMERA_WORDS.test(w)) continue; // "CLOSE ON", "INSERT": directions for the camera, not things on set
+    if (w.length < 3 || /^(INT|EXT|CONT'?D|V\.?O|O\.?S|CUT|FADE|DAY|NIGHT|THE|AND|I|OK|TV)$/.test(w) || castNames.has(w) || intros.has(w)) continue;
+    const cat = known?.map.get(w.toLowerCase())?.cat || (SOUND_CAPS.test(w) ? 'sfx' : (LEXICON.find(([, re]) => { re.lastIndex = 0; return re.test(w.toLowerCase()); }) || ['props'])[0]);
+    add(w, cat, m.index, 'Written in CAPS');
   }
-  // 2. Ordinary words each department listens for, with one describing word in front ("red raincoat", "chipped mug").
+  // 2. Anything already tagged by hand in another scene.
+  if (known) { known.re.lastIndex = 0; for (const m of text.matchAll(known.re)) { const k = known.map.get(m[1].toLowerCase()); add(k.item, k.cat, m.index, 'Tagged in another scene'); } }
+  // 3. Ordinary words each department listens for, with one describing word in front ("red raincoat", "chipped mug").
   for (const [cat, re] of LEXICON) {
     re.lastIndex = 0;
     for (const m of text.matchAll(re)) {
       if (m[2] === m[2].toUpperCase() && /[A-Z]/.test(m[2])) continue; // ALL-CAPS already handled above
-      if (cat === 'stunts') { add(stuntName(m[2]), 'stunts'); continue; }
+      if (cat === 'stunts') { add(stuntName(m[2]), 'stunts', m.index); continue; }
       // One describing word in front, but never a character's name or a filler word.
       const lead = m[1] && !STOPWORD.test(m[1]) && !/(ly|ing|s)$/i.test(m[1]) && !castNames.has(m[1].toUpperCase()) ? m[1] + ' ' : '';
       if ([...found.keys()].some(k => k.includes(m[2].toLowerCase()))) continue; // "chipped MUG" already covers "mug"
-      add(lead + m[2], cat);
+      add(lead + m[2], cat, m.index);
     }
   }
   return [...found.values()];
@@ -1212,12 +1329,13 @@ const tagList = v => String(v || '').split(',').map(x => x.trim()).filter(Boolea
 const sameTag = (a, b) => a.toLowerCase() === b.toLowerCase();
 // Apply detections to a scene. Tags this added (s.autoEl) leave when their words leave the script;
 // an auto tag you delete is remembered (s.rejected) and never comes back.
-function autoTagScene(s, found) {
+function autoTagScene(s, found, forget = false) {
   s.autoEl ||= {}; s.rejected ||= [];
+  s.autoWhy = Object.fromEntries(found.filter(f => f.why).map(f => [f.item.toLowerCase(), f.why]));
   let added = 0;
   ELEMENTS.forEach(([k]) => {
     const have = tagList(s[k]), prev = s.autoEl[k] || [];
-    prev.forEach(it => { if (!have.some(h => sameTag(h, it)) && !s.rejected.includes(it.toLowerCase())) s.rejected.push(it.toLowerCase()); });
+    if (!forget) prev.forEach(it => { if (!have.some(h => sameTag(h, it)) && !s.rejected.includes(it.toLowerCase())) s.rejected.push(it.toLowerCase()); });
     const now = found.filter(f => f.cat === k && !s.rejected.includes(f.item.toLowerCase())).map(f => f.item);
     let list = have.filter(h => !(prev.some(p => sameTag(p, h)) && !now.some(n => sameTag(n, h))));
     const mine = prev.filter(p => now.some(n => sameTag(n, p)));
@@ -1237,10 +1355,10 @@ function speakersByScene() {
 }
 function syncScenes() {
   if (!V.auto || !S.script.trim()) return;
-  const before = JSON.stringify([S.scenes, S.people]), speak = speakersByScene();
+  const before = JSON.stringify([S.scenes, S.people]), speak = speakersByScene(), act = actionByScene();
   buildScenes();
   S.scenes.forEach(s => {
-    const names = speak.get(String(s.num)) || [];
+    const names = [...(speak.get(String(s.num)) || []), ...introsIn(act.get(String(s.num)) || '')];
     // Characters cleared with "Clear all" (s.castRejected) stay off until "Auto-tag" is pressed.
     const keep = names.filter(n => !(s.castRejected || []).includes(n.replace(/\(.*?\)/g, '').trim().toUpperCase()));
     keep.forEach(n => tagItem(s, 'cast', n));
@@ -1256,13 +1374,14 @@ function syncScenes() {
 function autoTagScenes(list) {
   buildScenes();
   const speak = speakersByScene(), act = actionByScene(), names = new Set([...charStats().keys(), ...S.people.filter(p => p.type === 'cast').map(p => String(p.role).toUpperCase())]);
-  const count = {cast: 0};
+  const count = {cast: 0}, known = knownTags();
   list.forEach(s => {
     s.rejected = []; s.castRejected = [];
-    (speak.get(String(s.num)) || []).forEach(n => { if (tagItem(s, 'cast', n)) count.cast++; });
-    s.autoCast = [...new Set((speak.get(String(s.num)) || []).map(castNumFor).filter(Boolean))];
+    const who = [...(speak.get(String(s.num)) || []), ...introsIn(act.get(String(s.num)) || '')];
+    who.forEach(n => { if (tagItem(s, 'cast', n)) count.cast++; });
+    s.autoCast = [...new Set(who.map(castNumFor).filter(Boolean))];
     const before = Object.fromEntries(ELEMENTS.map(([k]) => [k, tagList(s[k]).length]));
-    autoTagScene(s, detectElements(act.get(String(s.num)) || '', names));
+    autoTagScene(s, detectElements(act.get(String(s.num)) || '', names, known), true); // the button brings back tags you removed
     ELEMENTS.forEach(([k]) => count[k] = (count[k] || 0) + tagList(s[k]).length - before[k]);
   });
   return count;
@@ -1274,7 +1393,7 @@ function clearTags(list) {
   list.forEach(s => {
     n += castOf(s).length + ELEMENTS.reduce((a, [k]) => a + tagList(s[k]).length, 0);
     s.rejected = [...new Set([...ELEMENTS.flatMap(([k]) => tagList(s[k])), ...detectElements(act.get(String(s.num)) || '', names).map(f => f.item)].map(x => x.toLowerCase()))];
-    s.castRejected = (speak.get(String(s.num)) || []).map(x => x.replace(/\(.*?\)/g, '').trim().toUpperCase());
+    s.castRejected = [...(speak.get(String(s.num)) || []), ...introsIn(act.get(String(s.num)) || '')].map(x => x.replace(/\(.*?\)/g, '').trim().toUpperCase());
     s.cast = ''; s.autoCast = []; s.autoEl = {};
     ELEMENTS.forEach(([k]) => s[k] = '');
   });
@@ -1284,8 +1403,27 @@ const countText = c => [c.cast ? `${c.cast} cast` : '', ...ELEMENTS.map(([k, l])
 // Props, wardrobe, makeup, set dressing, vehicles, stunts, effects and extras for every scene. Returns how many were added.
 function autoTagAll() {
   const act = actionByScene(), names = new Set([...charStats().keys(), ...S.people.filter(p => p.type === 'cast').map(p => String(p.role).toUpperCase())]);
-  return S.scenes.reduce((n, s) => n + autoTagScene(s, detectElements(act.get(String(s.num)) || '', names)), 0);
+  const known = knownTags();
+  return S.scenes.reduce((n, s) => n + autoTagScene(s, detectElements(act.get(String(s.num)) || '', names, known)), 0);
 }
+// Things the AD and safety officer need to know about a scene, read from its heading, tags and action.
+const RISKS = [
+  ['Minors', /\b(child|children|kids?|bab(?:y|ies)|infant|toddler|teen(?:ager)?s?|schoolboy|schoolgirl)\b|\((?:[1-9]|1[0-7])\)|,\s(?:[1-9]|1[0-7]),/i],
+  ['Water', /\b(pool|lake|ocean|sea|river|surf|swim\w*|underwater|drown\w*|bathtub|waves?)\b/i],
+  ['Weapons', /\b(guns?|pistols?|revolvers?|rifles?|shotguns?|knife|knives|swords?|blades?|gunshots?|gunfire|machetes?)\b/i],
+  ['Fire / pyro', /\b(fire|flames?|explosions?|explodes?|burning|blaze|pyro)\b/i],
+  ['Animals', /\b(dogs?|puppy|cats?|kitten|horses?|birds?|snakes?|cows?|chickens?|animals?)\b/i],
+  ['Moving vehicle', /\b(drives?|driving|speeds? (?:off|away|down|past|by)|car chase|swerves?)\b/i],
+];
+function sceneFlags(s, text = '') {
+  const f = /EXT/.test(s.ie) && /NIGHT|DUSK|DAWN/.test(s.tod) ? ['Night exterior'] : [];
+  RISKS.forEach(([l, re]) => re.test(text) && f.push(l));
+  if (tagList(s.stunts).length) f.push('Stunts');
+  if (tagList(s.extras).length) f.push('Crowd');
+  return f;
+}
+const flagsHtml = f => f.length ? `<span class="flags">${f.map(x => `<span class="flag">${esc(x)}</span>`).join('')}</span>` : '';
+console.assert(sceneFlags({ie: 'EXT', tod: 'NIGHT', stunts: 'Fall'}, 'She drops the gun in the pool.').join() === 'Night exterior,Water,Weapons,Stunts', 'sceneFlags');
 const castNumFor = name => { const n = name.replace(/\(.*?\)/g, '').replace(/\^$/, '').trim().toUpperCase(); return String(S.people.find(p => p.type === 'cast' && String(p.role).toUpperCase() === n)?.num || ''); };
 // Find & replace over the editor's lines.
 let popSel = null;
@@ -1563,7 +1701,7 @@ function voicePlan() {
   });
   return {narrator, plan, best: ranked[0] ? voiceScore(ranked[0]) : 0};
 }
-let voiceHintShown = false;
+let voiceHintShown = false, curAudio = null, kokoro = null;
 function speak(text, voice, pitch = 1, onend) {
   const u = new SpeechSynthesisUtterance(text);
   if (voice) u.voice = voice;
@@ -1571,34 +1709,78 @@ function speak(text, voice, pitch = 1, onend) {
   if (onend) { u.onend = onend; u.onerror = onend; }
   speechSynthesis.speak(u);
 }
-function tableRead() {
-  if (!('speechSynthesis' in window)) return toast("This browser can't read aloud");
-  if (reading) return stopRead();
-  const kids = [...$('#ed').children], {narrator, plan, best} = voicePlan();
-  if (best < 80 && !voiceHintShown) { voiceHintShown = true; toast('These are basic voices. For natural ones, open Slate in Microsoft Edge (free neural voices) or add Premium voices on a Mac.'); }
-  const voiceFor = name => { const p = plan.get(name); return p ? [p.voice, p.pitch] : [narrator, 1]; };
-  let i = Math.max(0, kids.indexOf(edCur)), speaker = null;
-  reading = true;
-  const btn = $('#readbtn'); if (btn) btn.textContent = 'Stop reading';
-  const next = () => {
+// Natural voices: Kokoro (Apache-2.0) runs on this computer after a one-time download of about 90 MB.
+const KOKORO = {F: ['af_heart', 'af_bella', 'bf_emma', 'af_nicole', 'af_sarah', 'bf_isabella', 'af_sky', 'af_nova', 'bf_alice', 'af_river', 'bf_lily', 'af_jessica'],
+  M: ['am_michael', 'am_fenrir', 'bm_george', 'am_puck', 'am_adam', 'bm_fable', 'am_eric', 'bm_lewis', 'am_liam', 'bm_daniel', 'am_onyx', 'am_echo']};
+function loadKokoro() {
+  kokoro ||= import('https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.web.js')
+    .then(({KokoroTTS}) => KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {dtype: 'q8', device: 'wasm'}))
+    .catch(e => { kokoro = null; throw e; });
+  return kokoro;
+}
+// Narrator reads action; each character gets their own voice of their gender, in turn.
+function kokoroPlan() {
+  const plan = new Map(), used = {F: 1, M: 0};
+  [...charStats().keys()].forEach((name, k) => {
+    const g = {Female: 'F', Male: 'M'}[S.chars[name]?.gender] || (FEMALE.test(name) && !/\bfemale\b/i.test(name) ? 'F' : MALE.test(name) && !/\bmale\b/i.test(name) ? 'M' : k % 2 ? 'F' : 'M');
+    plan.set(name, KOKORO[g][used[g]++ % KOKORO[g].length]);
+  });
+  return {narrator: 'af_heart', plan};
+}
+function systemSayer() {
+  const {narrator, plan, best} = voicePlan();
+  if (best < 80 && !voiceHintShown) { voiceHintShown = true; toast('These are basic voices. Pick Natural voices next to Table read for much better ones.'); }
+  return it => new Promise(res => { const p = it.who && plan.get(it.who); speak(it.text, p ? p.voice : narrator, p ? p.pitch : 1, res); });
+}
+function kokoroSayer(tts, queue) {
+  const {narrator, plan} = kokoroPlan(), clips = [];
+  // Each line is made while the one before it plays, so the read keeps moving.
+  const make = q => queue[q] ? (clips[q] ||= tts.generate(queue[q].text, {voice: (queue[q].who && plan.get(queue[q].who)) || narrator, speed: V.rate || 1})) : null;
+  return async (it, q) => {
+    const clip = await make(q); make(q + 1)?.catch(() => {});
     if (!reading) return;
-    const el = kids[i++];
-    if (!el) return stopRead();
+    await new Promise(res => {
+      const a = curAudio = new Audio(URL.createObjectURL(clip.toBlob()));
+      a.onended = a.onerror = a.onpause = () => { URL.revokeObjectURL(a.src); res(); };
+      a.play().catch(res);
+    });
+  };
+}
+async function tableRead() {
+  if (reading) return stopRead();
+  let natural = V.tts === 'natural';
+  if (!natural && !('speechSynthesis' in window)) return toast("This browser can't read aloud");
+  const kids = [...$('#ed').children], queue = [];
+  let speaker = null;
+  kids.slice(Math.max(0, kids.indexOf(edCur))).forEach(el => {
     const t = el.dataset.t;
-    if (t === 'char') { speaker = blockText(el).replace(/\s*\(.*?\)\s*/g, '').replace(/\^/, '').trim().toUpperCase(); return next(); }
-    if (!['scene', 'action', 'dial', 'center', 'lyric'].includes(t)) { if (t !== 'paren') speaker = null; return next(); }
+    if (t === 'char') { speaker = blockText(el).replace(/\s*\(.*?\)\s*/g, '').replace(/\^/, '').trim().toUpperCase(); return; }
+    if (!['scene', 'action', 'dial', 'center', 'lyric'].includes(t)) { if (t !== 'paren') speaker = null; return; }
     if (t !== 'dial') speaker = null;
     const text = plain(blockText(el)).replace(/^INT\./i, 'Interior.').replace(/^EXT\./i, 'Exterior.');
-    if (!text.trim()) return next();
-    kids.forEach(k => k.classList.remove('reading')); el.classList.add('reading'); el.scrollIntoView({block: 'center'});
-    const [v, pitch] = t === 'dial' && speaker ? voiceFor(speaker) : [narrator, 1];
-    speak(text, v, pitch, () => reading && next());
-  };
-  next();
+    if (text.trim()) queue.push({el, text, who: t === 'dial' ? speaker : null});
+  });
+  const token = reading = {}, btn = $('#readbtn');
+  if (btn) btn.textContent = 'Stop reading';
+  let tts = null;
+  if (natural) {
+    try { if (!kokoro) toast('Getting natural voices ready. The first time downloads about 90 MB, so give it a minute.'); tts = await loadKokoro(); }
+    catch (e) { console.warn(e); natural = false; toast("Couldn't load the natural voices, so this read uses your system voices. The first download needs an internet connection."); }
+    if (reading !== token) return;
+  }
+  const say = natural ? kokoroSayer(tts, queue) : systemSayer();
+  try {
+    for (let q = 0; q < queue.length && reading === token; q++) {
+      kids.forEach(k => k.classList.remove('reading')); queue[q].el.classList.add('reading'); queue[q].el.scrollIntoView({block: 'center'});
+      await say(queue[q], q);
+    }
+  } catch (e) { console.warn(e); toast('The table read stopped: ' + (e.message || e)); }
+  if (reading === token) stopRead();
 }
 function stopRead() {
   reading = null;
   if ('speechSynthesis' in window) speechSynthesis.cancel();
+  if (curAudio) { curAudio.pause(); curAudio = null; }
   document.querySelectorAll('.reading').forEach(k => k.classList.remove('reading'));
   const btn = $('#readbtn'); if (btn) btn.textContent = 'Table read';
 }
@@ -1625,6 +1807,7 @@ function writeView() {
         <button data-act="dual" aria-pressed="false">Dual dialogue</button><button data-act="alts">Alternates</button>
         <div class="row"><button data-act="addnote">Add note</button><select id="notecat" aria-label="Note author">${Object.entries(NOTE_NAMES).map(([c, n]) => `<option value="${c}">${n}</option>`).join('')}</select></div>
         <button data-act="park">Move selection to boneyard</button><button data-act="read" id="readbtn">Table read</button>
+        <label class="tgl">Voices <select id="tts" aria-label="Table read voices"><option value="system">System</option><option value="natural" ${V.tts === 'natural' ? 'selected' : ''}>Natural (one-time download)</option></select></label>
         <label class="tgl">Reading speed <select id="rate" aria-label="Table read speed">${[[0.85, 'Slow'], [1, 'Normal'], [1.15, 'Brisk'], [1.3, 'Fast']].map(([v, l]) => `<option value="${v}" ${(V.rate || 1) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
         <button data-act="ref" data-v="chars">Choose voices…</button>
         <button data-act="autotag">Auto-tag all scenes</button><button data-act="cleartags">Clear all tags</button>
@@ -1675,15 +1858,16 @@ function refPane() {
       const shots = S.shots.filter(x => x.scene === s.id).length, tagged = ELEMENTS.flatMap(([k]) => tagList(s[k]).map(x => x.toLowerCase()));
       const names = new Set([...S.people.filter(p => p.type === 'cast').map(p => String(p.role).toUpperCase()), ...charStats().keys()]); // never suggest a character as a prop
       // Everything the detector finds in this scene that isn't tagged yet, each with the department it belongs to.
-      const sugg = detectElements(actionByScene().get(String(s.num)) || '', names)
+      const text = actionByScene().get(String(s.num)) || '';
+      const sugg = detectElements(text, names, knownTags())
         .filter(f => !tagged.some(t => t === f.item.toLowerCase() || ` ${t} `.includes(` ${f.item.toLowerCase()} `))).slice(0, 14);
-      const auto = s.autoEl || {}, autoMark = k => (auto[k] || []).length ? ` <span class="autotag" title="Added automatically from the action: ${esc(auto[k].join(', '))}">auto</span>` : '';
+      const auto = s.autoEl || {}, why = s.autoWhy || {}, autoMark = k => (auto[k] || []).length ? ` <span class="autotag" title="${esc('Added automatically:\n' + auto[k].map(x => `${x}: ${why[x.toLowerCase()] || 'from the action'}`).join('\n'))}">auto</span>` : '';
       body = `<div class="scene-card"><h4 class="mono">${esc(s.num)} ${esc(heading(s))}</h4>
         <div class="row"><button class="primary" data-act="autotag" data-i="${s.id}">Auto-tag scene</button><button data-act="cleartags" data-i="${s.id}">Clear all</button></div>
-        <p class="muted">${fmt8(s.pages)} pg · ${shots} shot${shots === 1 ? '' : 's'}${s.day ? ` · Day ${S.days.findIndex(d => d.id === s.day) + 1}` : ' · not scheduled'}</p>
+        <p class="muted">${fmt8(s.pages)} pg · ${shots} shot${shots === 1 ? '' : 's'}${s.day ? ` · Day ${S.days.findIndex(d => d.id === s.day) + 1}` : ' · not scheduled'}</p>${flagsHtml(sceneFlags(s, text))}
         <label>Cast <span class="castline">${esc(castOf(s).map(n => castName(n) || '#' + n).join(', ') || 'Nobody speaks yet')}</span></label>
         ${sugg.length ? `<div class="sugg"><span class="muted">Spotted in the action, not tagged:</span>
-          ${sugg.map(f => `<button class="chip t-${f.cat}" data-act="sugtag" data-i="${s.id}" data-v="${esc(f.item)}" data-k="${f.cat}">+ ${esc(f.item)} <small>${LABELS[f.cat]}</small></button>`).join('')}
+          ${sugg.map(f => `<button class="chip t-${f.cat}" data-act="sugtag" data-i="${s.id}" data-v="${esc(f.item)}" data-k="${f.cat}" title="${esc(f.why || '')}">+ ${esc(f.item)} <small>${LABELS[f.cat]}</small></button>`).join('')}
           <button class="link" data-act="sugall" data-i="${s.id}">Tag all ${sugg.length}</button></div>` : ''}
         <div class="bdgrid one">${ELEMENTS.map(([k, l]) => `<label><span class="lbl-row">${l}${autoMark(k)}</span>${fld('scenes', s, k)}</label>`).join('')}</div>
         <label>Scene description${fld('scenes', s, 'desc')}</label></div>`;
@@ -1873,6 +2057,13 @@ function mapView() {
       ${lanes.map((t, k) => `<text x="-8" y="${top + k * lh + lh / 2 + 4}" text-anchor="end" class="m-lbl">${esc(laneName(t))}</text><line x1="0" x2="${W}" y1="${top + (k + 1) * lh}" y2="${top + (k + 1) * lh}" class="m-lane"/>`).join('')}
       <text x="-8" y="44" text-anchor="end" class="m-lbl">Intensity</text>${guides}<polyline points="${arc.join(' ')}" class="m-arc${est ? ' est' : ''}"/>${out}${ticks}</svg></div>`;
 }
+// Scenes each pair of speaking characters share: the script's relationships at a glance.
+function shareMatrix(top) {
+  if (top.length < 2) return '';
+  const both = (a, b) => [...a.scenes].filter(x => b.scenes.has(x)).length, max = Math.max(1, ...top.flatMap(([a, sa]) => top.map(([b, sb]) => a === b ? 0 : both(sa, sb))));
+  return `<section class="plain"><h3>Who shares scenes <span class="muted">(scenes where both speak)</span></h3><div class="wrap"><table class="rep istats mat"><tr><th></th>${top.map(([n]) => `<th>${esc(n)}</th>`).join('')}</tr>
+    ${top.map(([a, sa]) => `<tr><th>${esc(a)}</th>${top.map(([b, sb]) => { const n = a === b ? 0 : both(sa, sb); return a === b ? '<td class="muted">—</td>' : `<td style="background:rgba(43,47,51,${(n / max * 0.3).toFixed(2)})">${n || ''}</td>`; }).join('')}</tr>`).join('')}</table></div></section>`;
+}
 function insightsView() {
   const st = charStats(), heads = parseScript(S.script), pages = layout().length;
   if (!heads.length && !st.size) return '<p class="empty">Insights appear once the script has scenes and dialogue.</p>';
@@ -1884,6 +2075,7 @@ function insightsView() {
   return `<div class="cards">${stat('Pages', pages)}${stat('Scenes', heads.length)}${stat('Speaking characters', st.size)}${stat('Screen time (≈1 min/page)', pages + ' min')}</div>
     <section class="plain"><h3>Dialogue balance</h3><table class="rep istats"><tr><th>Character</th><th>Lines</th><th>Words</th><th>Share of dialogue</th><th>Scenes</th></tr>
       ${ranked.map(([n, s]) => `<tr><td><b>${esc(n)}</b></td><td>${s.lines}</td><td>${s.words}</td><td>${bar(s.words, words)} ${(s.words / words * 100).toFixed(0)}%</td><td>${s.scenes.size}</td></tr>`).join('')}</table></section>
+    ${shareMatrix(ranked.slice(0, 8))}
     <section class="plain"><h3>Dialogue by gender <span class="muted">(set gender on character sheets)</span></h3><table class="rep istats">
       ${Object.entries(gender).sort((a, b) => b[1] - a[1]).map(([g, w]) => `<tr><td>${esc(g)}</td><td>${bar(w, words)} ${(w / words * 100).toFixed(0)}%</td></tr>`).join('')}</table></section>
     <section class="plain"><h3>Scene mix</h3><table class="rep istats">
@@ -1974,6 +2166,7 @@ async function pdfToText(file) {
       lastY = y;
     });
   }
+  if (!blocks.length && !titleText.trim()) throw new Error('this PDF has no text in it. It looks scanned (pictures of pages), so run it through OCR first, or export a text PDF from your writing app.');
   const body = blocksToText(blocks);
   return titleText ? titleText + '\n\n' + body : body;
 }
@@ -2117,8 +2310,9 @@ const tabs = {
       <button class="primary" data-act="autotag">Auto-tag all scenes</button><button data-act="cleartags">Clear all tags</button><button data-act="print">Print</button>
       <span class="muted">Separate items with commas. The call sheet lists them for each day.</span></div>`;
     if (!scenes.length) return bar + '<p class="empty">No scenes yet. Build them from the script first.</p>';
+    const act = actionByScene();
     if (V.bd === 'scene') return bar + scenes.map(s => `<section class="bd"><h3 class="mono">${esc(s.num)} ${esc(heading(s))}</h3>
-      <span class="muted">${esc(s.desc)}${castOf(s).length ? ` · Cast ${esc(castOf(s).join(', '))}` : ''}</span>
+      <span class="muted">${esc(s.desc)}${castOf(s).length ? ` · Cast ${esc(castOf(s).join(', '))}` : ''}</span>${flagsHtml(sceneFlags(s, act.get(String(s.num))))}
       <div class="bdgrid">${ELEMENTS.map(([k, l]) => `<label>${l}${fld('scenes', s, k)}</label>`).join('')}</div></section>`).join('');
     const report = ELEMENTS.map(([k, l]) => {
       const m = new Map();
@@ -2140,12 +2334,13 @@ const tabs = {
     const head = `<div class="bar"><button class="primary" data-act="add-shot" ${scenes.length ? '' : 'disabled'}>Add shot</button>
       ${seg('shots', [['list', 'List'], ['boards', 'Storyboard']])}
       ${V.shots === 'boards' ? `<label class="muted">Frame size <input type="range" id="fsize" min="160" max="520" step="40" value="${V.size}" style="width:120px;vertical-align:middle"></label><span class="muted">Drop or paste images onto a frame</span>` : ''}
-      <button data-act="masters" ${scenes.length ? '' : 'disabled'}>Add a master shot to empty scenes</button><button data-act="print">Print</button>
+      <button data-act="masters" ${scenes.length ? '' : 'disabled'}>Add a master shot to empty scenes</button><button data-act="suggestshots" ${scenes.length ? '' : 'disabled'} title="A shot for every CLOSE ON, INSERT, POV, ANGLE ON… written in the action">Shots from the script</button>
+      ${V.shots === 'boards' ? `<label class="tgl"><input type="checkbox" data-ui="guides" ${V.guides ? 'checked' : ''}> Framing guides</label>` : ''}<button data-act="print">Print</button>
       ${scenes.length ? `<span class="prog" role="progressbar" aria-label="Shots in the can" aria-valuemin="0" aria-valuenow="0" aria-valuemax="0"><i></i></span><span class="muted" id="canned"></span>` : '<span class="muted">Add scenes first.</span>'}</div>
       ${scenes.length ? `<div class="bar"><span class="muted">Focus</span>${scenes.map(s => `<button class="chip" data-act="focus" data-i="${s.id}" aria-pressed="${focus.has(s.id)}" title="${esc(heading(s))}">${esc(s.num)}</button>`).join('')}
       ${focus.size ? '<button class="link" data-act="focus" data-i="">Show all scenes</button>' : '<span class="muted">Pick scenes to work on them alone, with their script alongside.</span>'}</div>` : ''}`;
     if (V.shots === 'boards') {
-      const frame = sh => `<figure class="frame" data-shot="${sh.id}">${sh.img ? `<img data-img="${sh.img}" alt="Frame for shot ${esc(num(sh.scene))}/${esc(sh.num)}">` : `<button class="ph" data-act="pick" data-t="shot" data-i="${sh.id}">Add frame</button>`}
+      const frame = sh => `<figure class="frame" data-shot="${sh.id}">${sh.img ? `<span class="fimg"><img data-img="${sh.img}" alt="Frame for shot ${esc(num(sh.scene))}/${esc(sh.num)}">${V.guides ? '<i class="guide"></i>' : ''}</span>` : `<button class="ph" data-act="pick" data-t="shot" data-i="${sh.id}">Add frame</button>`}
         <figcaption><b class="mono">${esc(sh.num)}</b><span class="muted">${esc(sh.size)}</span>${fld('shots', sh, 'desc')}
         ${sh.img ? `<button class="link" data-act="pick" data-t="shot" data-i="${sh.id}">Replace</button><button class="link" data-act="unimg" data-i="${sh.id}">Remove</button>` : ''}</figcaption></figure>`;
       return head + (shown.map(s => {
@@ -2166,18 +2361,25 @@ const tabs = {
       ${shots.length || !scenes.length ? '' : '<p class="empty">No shots yet. Each shot belongs to a scene; add the first one above.</p>'}</div></div>`;
   }],
   schedule: ['Schedule', () => {
+    const act = actionByScene();
     const strip = s => {
-      const shots = S.shots.filter(sh => sh.scene === s.id).length, names = castOf(s).map(castName).filter(Boolean).join(', ');
+      const shots = S.shots.filter(sh => sh.scene === s.id).length, names = castOf(s).map(castName).filter(Boolean).join(', '), risk = sceneFlags(s, act.get(String(s.num)));
       return `<div class="strip ${stripCls(s)}" draggable="true" data-sid="${s.id}" title="${esc(names)}"><b>${esc(s.num)}</b> ${esc(heading(s))}<span>${esc(s.desc)}</span>
-        <span>Cast ${esc(castOf(s).join(', ') || '—')} · ${fmt8(s.pages)} pg · ${shots} shot${shots === 1 ? '' : 's'}</span></div>`;
+        <span>Cast ${esc(castOf(s).join(', ') || '—')} · ${fmt8(s.pages)} pg · ${shots} shot${shots === 1 ? '' : 's'}${risk.length ? ` · ⚠ ${esc(risk.join(', '))}` : ''}</span></div>`;
     };
-    const pages = id => fmt8(dayScenes(id).reduce((a, s) => a + (+s.pages || 0), 0));
-    return `<div class="bar"><button class="primary" data-act="add-day">Add shoot day</button><button data-act="print">Print board</button>
+    const pages = id => fmt8(dayScenes(id).reduce((a, s) => a + (+s.pages || 0), 0)), holds = holdDays();
+    return `<div class="bar"><button class="primary" data-act="add-day">Add shoot day</button>
+      <button data-act="autosched" ${dayScenes(null).length ? '' : 'disabled'} title="Puts unscheduled scenes on new days: day scenes first, grouped by location, up to the page target">Plan unscheduled scenes</button>
+      <label class="tgl">Target <select id="daytarget" aria-label="Pages per shoot day">${[3, 4, 5, 6, 7, 8, 10].map(n => `<option ${n === dayTarget() ? 'selected' : ''} value="${n}">${n} pages a day</option>`).join('')}</select></label>
+      <details class="stripcols"><summary>Strip colours</summary>${Object.entries(STRIP_COLORS).map(([k, [l, c]]) => `<label><input type="color" data-strip="${k}" value="${S.strips?.[k] || c}"> ${l}</label>`).join('')}<button class="link" data-act="stripreset">Reset</button></details>
+      <button data-act="print">Print board</button>
       <span class="muted">Drag strips between days, or pick a shoot day on the Scenes tab. Hover a strip for cast names.</span></div>
-      <div class="board"><div class="col" data-day=""><h4>Unscheduled <span class="muted">${pages(null)} pg</span></h4>${dayScenes(null).map(strip).join('')}</div>
+      ${holds.length ? `<p class="muted holds">Cast held between work days: ${holds.map(([n, h]) => `${esc(castName(n) || '#' + n)} ${h} day${h > 1 ? 's' : ''}`).join(', ')}</p>` : ''}
+      <div class="board" style="${stripVars()}"><div class="col" data-day=""><h4>Unscheduled <span class="muted">${pages(null)} pg</span></h4>${dayScenes(null).map(strip).join('')}</div>
       ${S.days.map((d, i) => `<div class="col" data-day="${d.id}"><h4>Day ${i + 1} <span class="muted">${pages(d.id)} pg <button class="link" data-act="open-cs" data-i="${d.id}">Call sheet</button>${del('days', d)}</span></h4>
         <div class="meta">${fld('days', d, 'date')}${fld('days', d, 'call')}
         <select data-c="days" data-i="${d.id}" data-k="locId" aria-label="Location">${opts(S.locs.map(l => [l.id, l.name || 'Unnamed location']), d.locId, 'No location set')}</select></div>
+        ${flagsHtml(dayHealth(i))}
         ${dayScenes(d.id).map(strip).join('')}</div>`).join('')}</div>`;
   }],
   people: ['Contacts', () => {
@@ -2199,11 +2401,17 @@ const tabs = {
     const cast = S.people.filter(p => p.type === 'cast' && nums.has(String(p.num))).sort(byNum);
     const crew = S.people.filter(p => p.type === 'crew').sort((a, b) => String(a.dept).localeCompare(String(b.dept)));
     const date = d.date ? new Date(d.date + 'T12:00').toLocaleDateString(undefined, {weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'}) : 'Date TBD';
+    const plan = dayPlan(d, scenes), act = actionByScene(), risky = scenes.map(s => [s, sceneFlags(s, act.get(String(s.num)))]).filter(([, f]) => f.length);
+    const row = s => `<tr>${plan ? `<td>${clock(plan.rows.find(r => r.s === s).at)}</td>` : ''}<td>${esc(s.num)}</td><td>${esc(heading(s))}</td><td>${esc(s.desc)}</td><td>${esc(castOf(s).join(', '))}</td><td>${fmt8(s.pages)}</td></tr>`;
     return `<div class="bar"><select id="csday" aria-label="Shoot day" style="width:auto">${S.days.map((x, j) => `<option value="${x.id}" ${x.id === csDay ? 'selected' : ''}>Day ${j + 1}${x.date ? ' — ' + x.date : ''}</option>`).join('')}</select>
+      <span class="muted">Shift times</span><button data-act="shift" data-i="${d.id}" data-v="-15">−15 min</button><button data-act="shift" data-i="${d.id}" data-v="15">+15 min</button>
+      <label class="tgl">Pace <select id="minpage" aria-label="Minutes to shoot a page">${[30, 45, 60, 75, 90, 120].map(n => `<option ${n === (+S.minPerPage || 60) ? 'selected' : ''} value="${n}">${n} min a page</option>`).join('')}</select></label>
       <button class="primary" data-act="print">Print / Save PDF</button></div>
-      <div class="sheet"><h2>${esc(S.title)}</h2><p><b>Day ${i + 1} of ${S.days.length}</b> · ${esc(date)} · General call <b>${esc(d.call || 'TBD')}</b></p>
-      <h3>Scenes</h3><table class="sets"><tr><th>#</th><th>Set</th><th>Description</th><th>Cast</th><th>Pages</th></tr>
-      ${scenes.map(s => `<tr><td>${esc(s.num)}</td><td>${esc(heading(s))}</td><td>${esc(s.desc)}</td><td>${esc(castOf(s).join(', '))}</td><td>${fmt8(s.pages)}</td></tr>`).join('') || '<tr><td colspan="5">No scenes scheduled.</td></tr>'}</table>
+      <div class="sheet"><h2>${esc(S.title)}</h2><p><b>Day ${i + 1} of ${S.days.length}</b> · ${esc(date)} · General call <b>${esc(plan ? clock(toMin(d.call)) : d.call || 'TBD')}</b>${plan ? ` · Estimated wrap <b>${clock(plan.wrap)}</b>` : ''}</p>
+      <h3>Scenes</h3><table class="sets"><tr>${plan ? '<th>Est. start</th>' : ''}<th>#</th><th>Set</th><th>Description</th><th>Cast</th><th>Pages</th></tr>
+      ${plan ? plan.rows.map(r => r.lunch ? `<tr class="lunch"><td>${clock(r.at)}</td><td colspan="5">Lunch, 30 minutes</td></tr>` : row(r.s)).join('') : scenes.map(row).join('')}
+      ${scenes.length ? '' : `<tr><td colspan="${plan ? 6 : 5}">No scenes scheduled.</td></tr>`}</table>
+      ${risky.length ? `<h3>Safety</h3><table><tr><th>#</th><th>Talk through at the safety meeting</th></tr>${risky.map(([s, f]) => `<tr><td>${esc(s.num)}</td><td>${esc(f.join(', '))}</td></tr>`).join('')}</table>` : ''}
       ${loc ? `<h3>Location</h3><p><b>${esc(loc.name)}</b>${loc.address ? `<br>${esc(loc.address)}` : ''}${loc.contact || loc.phone ? `<br>Contact: ${esc(loc.contact)} ${esc(loc.phone)}` : ''}${loc.parking ? `<br>Parking: ${esc(loc.parking)}` : ''}</p>
         ${loc.hospital ? `<p><b>Nearest hospital:</b> ${esc(loc.hospital)}</p>` : ''}` : ''}
       ${scenes.some(elementsOf) ? `<h3>Departments</h3><table><tr><th>#</th><th>Props, wardrobe and other elements</th></tr>
@@ -2264,6 +2472,10 @@ document.addEventListener('input', e => {
   if (t.id === 'fsize') { V.size = +t.value; return document.querySelectorAll('.frames').forEach(f => f.style.setProperty('--fw', V.size + 'px')); }
   if (t.id === 'ed') { autoFormat(); commitEd(); edSuggest(); typewriter(); return; }
   if (t.id === 'rate') { V.rate = +t.value; return; }
+  if (t.id === 'tts') { V.tts = t.value; try { localStorage.setItem('slate-tts', t.value); } catch {} return; }
+  if (t.id === 'daytarget') { S.dayTarget = +t.value; save(); return render(); }
+  if (t.id === 'minpage') { S.minPerPage = +t.value; save(); return render(); }
+  if (t.dataset.strip) { S.strips = {...S.strips, [t.dataset.strip]: t.value}; save(); return $('.board')?.setAttribute('style', stripVars()); }
   if (t.id === 'fq' || t.id === 'fr' || t.id === 'fcase') {
     if (t.id === 'fcase') V.fcase = t.checked; else V[t.id] = t.value;
     if (t.id !== 'fr') { V.fidx = null; const n = findMatches().length, cnt = $('#fcount'); if (cnt) cnt.textContent = V.fq ? (n ? `${n} match${n === 1 ? '' : 'es'}` : 'No matches') : ''; }
@@ -2381,6 +2593,36 @@ const actions = {
     const empty = S.scenes.filter(s => !S.shots.some(sh => sh.scene === s.id));
     empty.forEach(s => S.shots.push({id: uid(), scene: s.id, num: '1', size: 'WS', angle: '', move: '', lens: '', desc: 'Master', done: false}));
     toast(empty.length ? `Added ${empty.length} master shot${empty.length > 1 ? 's' : ''}` : 'Every scene already has a shot');
+  },
+  suggestshots: () => {
+    buildScenes();
+    const bySn = new Map(S.scenes.map(s => [String(s.num), s]));
+    let n = 0;
+    shotCalls().forEach(c => {
+      const s = bySn.get(c.scene);
+      if (!s || S.shots.some(x => x.scene === s.id && String(x.desc).toLowerCase() === c.desc.toLowerCase())) return;
+      S.shots.push({id: uid(), scene: s.id, num: nextNum(S.shots.filter(x => x.scene === s.id)), size: c.size, angle: c.angle, move: c.move, lens: '', desc: c.desc, done: false}); n++;
+    });
+    toast(n ? `Added ${n} shot${n > 1 ? 's' : ''} the script calls for` : 'No new shot calls (CLOSE ON, INSERT, POV, ANGLE ON…) in the action');
+  },
+  autosched: () => {
+    const todo = S.scenes.filter(s => !s.day).sort((a, b) => isNight(a) - isNight(b) || baseLoc(a).localeCompare(baseLoc(b)) || String(a.ie).localeCompare(String(b.ie)) || byNum(a, b));
+    if (!todo.length) { toast('Every scene is already on a shoot day'); return false; }
+    let day = null, used = 0, made = 0, night = null;
+    todo.forEach(s => {
+      if (!day || isNight(s) !== night || (used && used + (+s.pages || 0) > dayTarget() * 8)) {
+        S.days.push(day = {id: uid(), date: '', call: isNight(s) ? '17:00' : '07:00', notes: '', locId: ''});
+        used = 0; made++; night = isNight(s);
+      }
+      s.day = day.id; s.order = used; used += +s.pages || 0;
+    });
+    toast(`Planned ${todo.length} scene${todo.length > 1 ? 's' : ''} over ${made} new day${made > 1 ? 's' : ''}, grouped by location, days before nights`, true);
+  },
+  stripreset: () => { delete S.strips; },
+  shift: b => {
+    const d = S.days.find(x => x.id === b.dataset.i), m = toMin(d?.call);
+    if (m == null) { toast('Set the call time first, like 07:00'); return false; }
+    d.call = hhmm(m + +b.dataset.v);
   },
   dup: b => {
     const sh = S.shots.find(x => x.id === b.dataset.i), copy = {...sh, id: uid(), num: nextNum(S.shots.filter(s => s.scene === sh.scene)), done: false};
