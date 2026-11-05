@@ -459,7 +459,7 @@ body.dark-ed .b.k-section{color:var(--chalk)}
 @page script{size:letter;margin:0}
 @media print{.tagbar{display:none}.pages{gap:0}.page{zoom:1!important;box-shadow:none;break-after:page;margin:0}body.revonly .page:not([data-cur=true]){display:none}
   .board{flex-wrap:wrap}.col{break-inside:avoid;border-color:#ccc;background:#fff}mark{background:none!important}}
-@media print{.side,.top,.bar,.link,.x,.ph,#toasts,.pnote,.focusbar,.ed-tools{display:none!important}html{background:#fff}.app{display:block;padding-left:0}main{padding:0}.wrap,.bd,.sheet{border:none}.sheet{max-width:none;padding:0}body{background:#fff;color:#111}.muted{color:#555}
+@media print{.noprint,.side,.top,.bar,.link,.x,.ph,#toasts,.pnote,.focusbar,.ed-tools{display:none!important}html{background:#fff}.app{display:block;padding-left:0}main{padding:0}.wrap,.bd,.sheet{border:none}.sheet{max-width:none;padding:0}body{background:#fff;color:#111}.muted{color:#555}
   input,textarea,select{border:none!important;background:none!important;color:#111!important;resize:none}.frame,.bd,.bscene h3{break-inside:avoid}}
 </style>
 </head>
@@ -1293,7 +1293,7 @@ function knownTags() {
 // What each department needs from one scene's action text: [{item, cat, why}], one entry per item.
 function detectElements(text, castNames = new Set(), known = null) {
   const intros = new Set(introsIn(text));
-  const found = new Map(), add = (item, cat, at = -1, rule = '') => { const key = item.toLowerCase(); if (item.length > 1 && !found.has(key) && !castNames.has(item.toUpperCase()) && !intros.has(item.toUpperCase()))
+  const found = new Map(), add = (item, cat, at = -1, rule = '') => { item = S?.aliases?.[item.toLowerCase()] ?? item; const key = item.toLowerCase(); if (item.length > 1 && !found.has(key) && !castNames.has(item.toUpperCase()) && !intros.has(item.toUpperCase()))
     found.set(key, {item: tagName(item), cat, why: (rule ? rule + ': ' : '') + (at >= 0 ? `“${quoteAt(text, at)}”` : '')}); };
   // 1. ALL-CAPS phrases: the screenplay convention for things that matter (and for sounds).
   for (const m of text.matchAll(/\b[A-Z][A-Z0-9'’-]{1,}(?:\s+[A-Z][A-Z0-9'’-]{1,})*\b/g)) {
@@ -1327,6 +1327,23 @@ function actionByScene() {
 }
 const tagList = v => String(v || '').split(',').map(x => x.trim()).filter(Boolean);
 const sameTag = (a, b) => a.toLowerCase() === b.toLowerCase();
+// "Gun" and "Pistol" are one prop: rename it in every scene, and auto-tagging uses the new name from now on. Returns scenes changed.
+function mergeTag(k, from, to) {
+  const f = from.toLowerCase(), swap = l => [...new Map(l.map(x => sameTag(x, from) ? to : x).map(x => [x.toLowerCase(), x])).values()];
+  S.aliases = {...S.aliases, [f]: to};
+  for (const a in S.aliases) if (S.aliases[a].toLowerCase() === f) S.aliases[a] = to; // earlier merges into "from" follow it
+  let n = 0;
+  S.scenes.forEach(s => {
+    const have = tagList(s[k]);
+    if (!have.some(x => sameTag(x, from))) return;
+    n++;
+    // A "to" you tagged by hand stays yours, even if the merged "from" was auto-tagged.
+    const handTo = have.some(x => sameTag(x, to)) && !(s.autoEl?.[k] || []).some(x => sameTag(x, to));
+    s[k] = swap(have).join(', ');
+    if (s.autoEl?.[k]) s.autoEl[k] = swap(s.autoEl[k]).filter(x => !(handTo && sameTag(x, to)));
+  });
+  return n;
+}
 // Apply detections to a scene. Tags this added (s.autoEl) leave when their words leave the script;
 // an auto tag you delete is remembered (s.rejected) and never comes back.
 function autoTagScene(s, found, forget = false) {
@@ -1718,12 +1735,14 @@ function loadKokoro() {
     .catch(e => { kokoro = null; throw e; });
   return kokoro;
 }
-// Narrator reads action; each character gets their own voice of their gender, in turn.
+const kokoroLabel = id => `${id[3].toUpperCase() + id.slice(4)} (${id[0] === 'b' ? 'UK' : 'US'} ${id[1] === 'f' ? 'female' : 'male'})`;
+// Narrator reads action; a voice picked on the character sheet wins, the rest get the next free voice of their gender.
 function kokoroPlan() {
-  const plan = new Map(), used = {F: 1, M: 0};
-  [...charStats().keys()].forEach((name, k) => {
+  const plan = new Map(), names = [...charStats().keys()], taken = new Set(['af_heart', ...names.map(n => S.chars[n]?.kvoice).filter(Boolean)]);
+  names.forEach((name, k) => {
     const g = {Female: 'F', Male: 'M'}[S.chars[name]?.gender] || (FEMALE.test(name) && !/\bfemale\b/i.test(name) ? 'F' : MALE.test(name) && !/\bmale\b/i.test(name) ? 'M' : k % 2 ? 'F' : 'M');
-    plan.set(name, KOKORO[g][used[g]++ % KOKORO[g].length]);
+    const v = S.chars[name]?.kvoice || KOKORO[g].find(x => !taken.has(x)) || KOKORO[g][k % KOKORO[g].length];
+    taken.add(v); plan.set(name, v);
   });
   return {narrator: 'af_heart', plan};
 }
@@ -1886,19 +1905,21 @@ function refPane() {
   } else if (V.ref === 'chars') {
     const st = charStats(), names = [...st.keys()];
     if (V.charSel && !st.has(V.charSel)) V.charSel = null;
-    const voices = rankedVoices(), {narrator, plan} = voicePlan();
+    const voices = rankedVoices(), {narrator, plan} = voicePlan(), nat = V.tts === 'natural', kp = nat ? kokoroPlan() : null;
+    const vname = n => nat ? kokoroLabel(kp.plan.get(n)) : plan.get(n) ? voiceLabel(plan.get(n).voice) + (plan.get(n).pitch !== 1 ? ' (pitch shifted)' : '') : '';
     // Who reads who, at a glance.
-    body = names.length ? `<p class="muted">Table read: narrator is ${esc(narrator ? voiceLabel(narrator) : 'your browser’s default')}.</p>
-      <ul class="clist">${names.map(n => { const s = st.get(n), p = plan.get(n); return `<li><button class="link" data-act="charsel" data-v="${esc(n)}" aria-pressed="${V.charSel === n}"><b>${esc(n)}</b></button>
-        <span class="muted">${s.lines} lines · ${s.scenes.size} scenes${p ? ` · voice: ${esc(voiceLabel(p.voice))}${p.pitch !== 1 ? ' (pitch shifted)' : ''}` : ''}</span></li>`; }).join('')}</ul>` : '<p class="muted">Characters appear once they speak.</p>';
+    body = names.length ? `<p class="muted">Table read: narrator is ${esc(nat ? kokoroLabel(kp.narrator) + ', natural voice' : narrator ? voiceLabel(narrator) : 'your browser’s default')}.</p>
+      <ul class="clist">${names.map(n => { const s = st.get(n), v = vname(n); return `<li><button class="link" data-act="charsel" data-v="${esc(n)}" aria-pressed="${V.charSel === n}"><b>${esc(n)}</b></button>
+        <span class="muted">${s.lines} lines · ${s.scenes.size} scenes${v ? ` · voice: ${esc(v)}` : ''}</span></li>`; }).join('')}</ul>` : '<p class="muted">Characters appear once they speak.</p>';
     if (V.charSel) {
       const n = V.charSel, c = S.chars[n] || {}, s = st.get(n), f = (k, l, ta) => `<label>${l}${ta ? `<textarea data-ch="${esc(n)}" data-k="${k}" rows="3">${esc(c[k])}</textarea>` : `<input data-ch="${esc(n)}" data-k="${k}" value="${esc(c[k])}">`}</label>`;
       body += `<div class="sheet-card"><h4>${esc(n)}</h4><p class="muted">First seen in scene ${esc([...s.scenes][0] || '?')} · appears in ${[...s.scenes].map(esc).join(', ')}</p>
         <div class="two">${f('age', 'Age')}<label>Gender<select data-ch="${esc(n)}" data-k="gender">${['', 'Female', 'Male', 'Non-binary', 'Other'].map(g => `<option ${c.gender === g ? 'selected' : ''} value="${g}">${g || '—'}</option>`).join('')}</select></label></div>
         ${f('goal', 'Goal / want')}${f('backstory', 'Backstory', 1)}${f('relationships', 'Relationships', 1)}${f('arc', 'Arc', 1)}
-        <label>Table-read voice <span class="muted">(★ = natural)</span><span class="row"><select data-ch="${esc(n)}" data-k="voice"><option value="">Automatic · ${esc(plan.get(n) ? voiceLabel(plan.get(n).voice) : 'best available')}</option>${voices.map(v => `<option value="${esc(v.voiceURI)}" ${c.voice === v.voiceURI ? 'selected' : ''}>${esc(voiceLabel(v))}</option>`).join('')}</select>
+        ${nat ? `<label>Table-read voice <span class="muted">(natural voices)</span><span class="row"><select data-ch="${esc(n)}" data-k="kvoice"><option value="">Automatic</option>${[...KOKORO.F, ...KOKORO.M].map(v => `<option value="${v}" ${c.kvoice === v ? 'selected' : ''}>${kokoroLabel(v)}</option>`).join('')}</select>`
+          : `<label>Table-read voice <span class="muted">(★ = natural)</span><span class="row"><select data-ch="${esc(n)}" data-k="voice"><option value="">Automatic · ${esc(plan.get(n) ? voiceLabel(plan.get(n).voice) : 'best available')}</option>${voices.map(v => `<option value="${esc(v.voiceURI)}" ${c.voice === v.voiceURI ? 'selected' : ''}>${esc(voiceLabel(v))}</option>`).join('')}</select>`}
           <button data-act="vprev" data-v="${esc(n)}">Preview</button></span></label>
-        ${voices.length && voiceScore(voices[0]) < 80 ? '<p class="muted vhint">Only basic voices here. Microsoft Edge has free natural voices; on a Mac, add Premium voices in System Settings → Accessibility → Spoken Content.</p>' : ''}</div>`;
+        ${!nat && voices.length && voiceScore(voices[0]) < 80 ? '<p class="muted vhint">Only basic voices here. Pick Natural voices next to Table read, or use Microsoft Edge, which has free natural voices.</p>' : ''}</div>`;
     }
   } else if (V.ref === 'notes') {
     const list = [];
@@ -2321,10 +2342,11 @@ const tabs = {
         if (!m.has(key)) m.set(key, {name: x, sc: []});
         m.get(key).sc.push(s.num);
       }
-      return [l, [...m.values()]];
-    }).filter(([, items]) => items.length);
-    return bar + (report.map(([l, items]) => `<section class="bd"><h3>${l}</h3><table class="rep"><tr><th>Item</th><th>Scenes</th></tr>
-      ${items.map(i => `<tr><td>${esc(i.name)}</td><td class="mono">${esc(i.sc.join(', '))}</td></tr>`).join('')}</table></section>`).join('')
+      return [k, l, [...m.values()]];
+    }).filter(([, , items]) => items.length);
+    const merge = (k, i, items) => items.length < 2 ? '' : `<select data-merge="${k}" data-from="${esc(i.name)}" aria-label="Merge ${esc(i.name)} into another item"><option value="">Merge into…</option>${items.filter(o => o !== i).map(o => `<option>${esc(o.name)}</option>`).join('')}</select>`;
+    return bar + (report.map(([k, l, items]) => `<section class="bd"><h3>${l}</h3><table class="rep"><tr><th>Item</th><th>Scenes</th><th class="noprint" aria-label="Merge"></th></tr>
+      ${items.map(i => `<tr><td>${esc(i.name)}</td><td class="mono">${esc(i.sc.join(', '))}</td><td class="noprint">${merge(k, i, items)}</td></tr>`).join('')}</table></section>`).join('')
       || '<p class="empty">Nothing broken down yet. Fill in props, wardrobe and the rest under "By scene".</p>');
   }],
   shots: ['Shots', () => {
@@ -2472,7 +2494,8 @@ document.addEventListener('input', e => {
   if (t.id === 'fsize') { V.size = +t.value; return document.querySelectorAll('.frames').forEach(f => f.style.setProperty('--fw', V.size + 'px')); }
   if (t.id === 'ed') { autoFormat(); commitEd(); edSuggest(); typewriter(); return; }
   if (t.id === 'rate') { V.rate = +t.value; return; }
-  if (t.id === 'tts') { V.tts = t.value; try { localStorage.setItem('slate-tts', t.value); } catch {} return; }
+  if (t.id === 'tts') { V.tts = t.value; try { localStorage.setItem('slate-tts', t.value); } catch {} return updateRefPane(); }
+  if (t.dataset.merge) { const n = mergeTag(t.dataset.merge, t.dataset.from, t.value); save(); toast(`Merged “${t.dataset.from}” into “${t.value}” in ${n} scene${n === 1 ? '' : 's'}. Auto-tagging uses “${t.value}” from now on.`); return render(); }
   if (t.id === 'daytarget') { S.dayTarget = +t.value; save(); return render(); }
   if (t.id === 'minpage') { S.minPerPage = +t.value; save(); return render(); }
   if (t.dataset.strip) { S.strips = {...S.strips, [t.dataset.strip]: t.value}; save(); return $('.board')?.setAttribute('style', stripVars()); }
@@ -2707,9 +2730,17 @@ const actions = {
   },
   'print-rev': () => { V.script = 'pages'; render(); document.body.classList.add('revonly'); window.print(); document.body.classList.remove('revonly'); return false; },
   vprev: b => {
-    const n = b.dataset.v, p = voicePlan().plan.get(n);
-    speechSynthesis.cancel();
-    speak(`This is ${n.charAt(0) + n.slice(1).toLowerCase()}, in the table read.`, p?.voice, p?.pitch || 1);
+    const n = b.dataset.v, line = `This is ${n.charAt(0) + n.slice(1).toLowerCase()}, in the table read.`;
+    stopRead();
+    if (V.tts === 'natural') {
+      if (!kokoro) toast('Getting natural voices ready. The first time downloads about 90 MB.');
+      loadKokoro().then(tts => tts.generate(line, {voice: kokoroPlan().plan.get(n) || 'af_heart'}))
+        .then(clip => { curAudio = new Audio(URL.createObjectURL(clip.toBlob())); return curAudio.play(); })
+        .catch(e => { console.warn(e); toast("Couldn't load the natural voices. The first download needs an internet connection."); });
+      return false;
+    }
+    const p = voicePlan().plan.get(n);
+    speak(line, p?.voice, p?.pitch || 1);
     return false;
   },
   bdpanel: () => { V.ref = V.ref === 'scene' ? null : 'scene'; return 'ui'; },
