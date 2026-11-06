@@ -533,13 +533,16 @@ const blank = () => ({title: 'Untitled Film', script: '', scenes: [], shots: [],
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const get = k => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
 let S, projects = get(IDX) || [];
+// Projects whose saved data can't be read. They are never saved over, so the data stays for recovery.
+const damaged = new Set();
+const unreadable = k => { try { const raw = localStorage.getItem(k); return raw != null && get(k) == null; } catch { return true; } };
 // Never fail silently: if the browser won't store data, say so and point to the backup.
 const persist = () => {
-  let ok = true;
+  let ok = !damaged.has(S.id);
   const p = projects.find(p => p.id === S.id);
-  if (p) p.title = S.title;
+  if (p && ok) p.title = S.title;
   try {
-    localStorage.setItem(pkey(S.id), JSON.stringify(S));
+    if (ok) localStorage.setItem(pkey(S.id), JSON.stringify(S));
     localStorage.setItem(IDX, JSON.stringify(projects));
     localStorage.setItem(CUR, JSON.stringify(S.id));
   } catch { ok = false; }
@@ -581,7 +584,10 @@ function toast(msg, undoable) {
   while (box.children.length > 3) box.firstChild.remove();
   setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 160); }, undoable ? 5000 : 3200);
 }
-const openProject = id => { S = Object.assign(blank(), get(pkey(id)) || {}, {id}); csDay = null; resetHistory(); };
+const openProject = id => {
+  if (unreadable(pkey(id)) && !damaged.has(id)) { damaged.add(id); alert("This project's saved data can't be read. Slate has left it untouched and won't save over it. Switch to another project, or import a backup."); }
+  S = Object.assign(blank(), get(pkey(id)) || {}, {id}); csDay = null; resetHistory();
+};
 const newProject = () => { const id = uid(); projects.push({id, title: 'Untitled Film'}); S = Object.assign(blank(), {id}); persist(); resetHistory(); };
 
 // Storyboard images go to IndexedDB: browser storage for project data is only ~5 MB.
@@ -1105,11 +1111,11 @@ let focus = new Set(), note = '';
 const castName = n => S.people.find(p => p.type === 'cast' && String(p.num) === String(n))?.role || '';
 // Highlight a scene's tagged words on the page, colored by category.
 function tagRegex(s) {
-  const items = [...ELEMENTS.flatMap(([k]) => String(s[k] || '').split(',').map(x => [x.trim(), k])), ...castOf(s).map(n => [castName(n), 'cast'])].filter(([x]) => x.length > 1);
+  const items = [...ELEMENTS.flatMap(([k]) => tagList(s[k]).map(x => [x, k])), ...castOf(s).map(n => [castName(n), 'cast'])].filter(([x]) => x.length > 1);
   if (!items.length) return null;
   const cat = new Map(items.map(([x, k]) => [esc(x).toLowerCase(), k]));
   const alt = [...cat.keys()].sort((a, b) => b.length - a.length).map(x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  return {re: new RegExp(`(^|[^\\w])(${alt})(?![\\w])`, 'gi'), cat};
+  return {re: new RegExp(`(^|[^\\w])(${alt})(?![\\w])(?!(?<=&\\w+);)`, 'gi'), cat};
 }
 const hl = (text, tr) => tr ? text.replace(tr.re, (m, pre, w) => `${pre}<mark class="t-${tr.cat.get(w.toLowerCase())}">${w}</mark>`) : text;
 // Notes never print. On screen they show as small markers you can filter by who wrote them.
@@ -1144,7 +1150,7 @@ const elementsOf = s => ELEMENTS.filter(([k]) => String(s[k] || '').trim()).map(
 const del = (c, it) => `<button class="x" data-act="del" data-c="${c}" data-i="${it.id}" aria-label="Delete ${ITEM[c]}${it.num ? ' ' + esc(it.num) : ''}">✕</button>`;
 const heading = s => `${s.ie ? s.ie + '. ' : ''}${s.loc}${s.tod ? ' - ' + s.tod : ''}`;
 const castOf = s => String(s.cast || '').split(/[,\s]+/).filter(Boolean);
-const stripCls = s => (/^EXT/.test(s.ie) ? 'ext' : 'int') + (/NIGHT|DUSK/.test(s.tod) ? '-n' : '-d');
+const stripCls = s => (/^EXT/.test(s.ie) ? 'ext' : 'int') + (isNight(s) ? '-n' : '-d');
 const STRIP_COLORS = {'int-d': ['INT day', '#f2f0ea'], 'ext-d': ['EXT day', '#f3e27a'], 'int-n': ['INT night', '#8fb3e8'], 'ext-n': ['EXT night', '#93cf95']};
 const stripVars = () => Object.keys(STRIP_COLORS).map(k => S.strips?.[k] ? `--${k}:${S.strips[k]}` : '').filter(Boolean).join(';');
 const baseLoc = s => String(s.loc || '').split(/\s+[-–—]\s+|\s*\/\s*/)[0].trim().toUpperCase();
@@ -1738,13 +1744,14 @@ function rankedVoices() {
   const all = 'speechSynthesis' in window ? speechSynthesis.getVoices() : [], en = all.filter(v => /^en/i.test(v.lang));
   return (en.length ? en : all).slice().sort((a, b) => voiceScore(b) - voiceScore(a));
 }
+// The sheet's gender wins; otherwise guess from a common first name in the character's name (OLD TOM → male).
+const charGender = name => ({Female: 'F', Male: 'M'}[S.chars[name]?.gender] || (FEMALE.test(name) && !/\bfemale\b/i.test(name) ? 'F' : MALE.test(name) && !/\bmale\b/i.test(name) ? 'M' : ''));
 // Narrator gets the best voice; each speaking character gets the best unused voice of their gender.
 // When the browser runs out of voices, characters share one but at a different pitch so they still sound distinct.
 function voicePlan() {
   const ranked = rankedVoices(), narrator = ranked[0], plan = new Map(), used = new Set([narrator]);
   [...charStats().keys()].forEach((name, k) => {
-    // The sheet's gender wins; otherwise guess from a common first name in the character's name (OLD TOM → male).
-    const want = {Female: 'F', Male: 'M'}[S.chars[name]?.gender] || (FEMALE.test(name) && !/\bfemale\b/i.test(name) ? 'F' : MALE.test(name) && !/\bmale\b/i.test(name) ? 'M' : '');
+    const want = charGender(name);
     const chosen = ranked.find(v => v.voiceURI === S.chars[name]?.voice);
     const fresh = ranked.filter(v => !used.has(v)), fits = v => !want || voiceGender(v) === want;
     const v = chosen || fresh.find(fits) || fresh[0] || ranked.filter(fits)[k % Math.max(1, ranked.filter(fits).length)] || narrator;
@@ -1776,7 +1783,7 @@ const kokoroLabel = id => `${id[3].toUpperCase() + id.slice(4)} (${id[0] === 'b'
 function kokoroPlan() {
   const plan = new Map(), names = [...charStats().keys()], taken = new Set(['af_heart', ...names.map(n => S.chars[n]?.kvoice).filter(Boolean)]);
   names.forEach((name, k) => {
-    const g = {Female: 'F', Male: 'M'}[S.chars[name]?.gender] || (FEMALE.test(name) && !/\bfemale\b/i.test(name) ? 'F' : MALE.test(name) && !/\bmale\b/i.test(name) ? 'M' : k % 2 ? 'F' : 'M');
+    const g = charGender(name) || (k % 2 ? 'F' : 'M');
     const v = S.chars[name]?.kvoice || KOKORO[g].find(x => !taken.has(x)) || KOKORO[g][k % KOKORO[g].length];
     taken.add(v); plan.set(name, v);
   });
@@ -1934,8 +1941,8 @@ function sidePacket(name, scenes, mode) {
 }
 // One packet per person, each starting on a new page, so a stack can be handed round.
 function buildSides() {
-  const scenes = sideScenes(), names = V.sidesFor ? [V.sidesFor] : sideNames(scenes), mode = V.sidesMode || 'read';
-  $('#sides').innerHTML = names.filter(n => scenes.some(x => x.beats.some(b => b.who === n))).map(n => sidePacket(n, scenes, mode)).join('');
+  const scenes = sideScenes(), all = sideNames(scenes), names = all.includes(V.sidesFor) ? [V.sidesFor] : all, mode = V.sidesMode || 'read'; // a name from another project means everyone
+  $('#sides').innerHTML = names.map(n => sidePacket(n, scenes, mode)).join('');
   return $('#sides').children.length;
 }
 const rhDraw = () => { const el = $('#rh'); if (el) { el.innerHTML = rhStage(); hydrate(); } };
@@ -1993,7 +2000,7 @@ function writeView() {
         <button data-act="park">Move selection to boneyard</button><button data-act="read" id="readbtn">Table read</button>
         <label class="tgl">Voices <select id="tts" aria-label="Table read voices"><option value="system">System</option><option value="natural" ${V.tts === 'natural' ? 'selected' : ''}>Natural (one-time download)</option></select></label>
         <label class="tgl">Reading speed <select id="rate" aria-label="Table read speed">${[[0.85, 'Slow'], [1, 'Normal'], [1.15, 'Brisk'], [1.3, 'Fast']].map(([v, l]) => `<option value="${v}" ${(V.rate || 1) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-        <button data-act="ref" data-v="chars">Choose voices…</button><button data-act="printsides" title="A packet of each person's lines. Choose the type under Shots, Rehearse">Print everyone's lines</button>
+        <button data-act="ref" data-v="chars">Choose voices…</button><button data-act="printsides" data-all="1" title="A packet of each person's lines. Choose the type under Shots, Rehearse">Print everyone's lines</button>
         <button data-act="autotag">Auto-tag all scenes</button><button data-act="cleartags">Clear all tags</button>
         <button data-act="find">Find &amp; replace (Ctrl+F)</button><button data-act="view" data-k="script" data-v="pages">Tag on the printed pages</button><button data-act="parse">Rebuild scenes list now</button>`)}
       ${menu('right', 'Lock &amp; Revisions', TICON.lock, L
@@ -2267,8 +2274,8 @@ function insightsView() {
     <section class="plain"><h3>Scene mix</h3><table class="rep istats">
       <tr><td>Interior</td><td>${bar(count(h => /^INT/.test(h.ie) && !/EXT/.test(h.ie)), heads.length)} ${count(h => /^INT/.test(h.ie) && !/EXT/.test(h.ie))}</td></tr>
       <tr><td>Exterior</td><td>${bar(count(h => /^EXT/.test(h.ie) && !/INT/.test(h.ie)), heads.length)} ${count(h => /^EXT/.test(h.ie) && !/INT/.test(h.ie))}</td></tr>
-      <tr><td>Day</td><td>${bar(count(h => !/NIGHT|DUSK|EVENING/.test(h.tod)), heads.length)} ${count(h => !/NIGHT|DUSK|EVENING/.test(h.tod))}</td></tr>
-      <tr><td>Night</td><td>${bar(count(h => /NIGHT|DUSK|EVENING/.test(h.tod)), heads.length)} ${count(h => /NIGHT|DUSK|EVENING/.test(h.tod))}</td></tr></table></section>`;
+      <tr><td>Day</td><td>${bar(count(h => !isNight(h)), heads.length)} ${count(h => !isNight(h))}</td></tr>
+      <tr><td>Night</td><td>${bar(count(isNight), heads.length)} ${count(isNight)}</td></tr></table></section>`;
 }
 
 /* ───────────── Import / export ───────────── */
@@ -2365,20 +2372,30 @@ function backupUI(state) {
   b.textContent = !backupDir ? 'Auto-backup to a folder…' : state === 'granted' ? `Backing up to "${backupDir.name}"` : 'Resume auto-backup';
   s.textContent = backupAt ? `Last backup ${backupAt.toLocaleTimeString(undefined, {timeStyle: 'short'})}` : '';
 }
+// Everything a restore needs in one file: the project, its images and its snapshot text.
+async function projectBackup() {
+  const images = {}, ids = [...S.shots.map(s => s.img), ...S.scenes.flatMap(s => s.refs || []), ...S.snaps.map(s => 'snap:' + s.id)].filter(Boolean);
+  for (const id of ids) { try { images[id] = await imgGet(id); } catch {} }
+  return JSON.stringify({...S, images});
+}
+// "Film 2 2026-01-02 03-04.slate.json" is not a backup of "Film".
+const isBackupOf = (title, file) => file.startsWith(title + ' ') && /^\d{4}-\d\d-\d\d \d\d-\d\d\.slate\.json$/.test(file.slice(title.length + 1));
+console.assert(isBackupOf('Film', 'Film 2026-01-02 03-04.slate.json') && !isBackupOf('Film', 'Film 2 2026-01-02 03-04.slate.json'), 'isBackupOf');
 async function runBackup(force) {
   if (!backupDir) return;
   const data = JSON.stringify(S);
   if (!force && data === lastBackup) return;
   try {
+    const full = await projectBackup();
     const d = new Date(), p2 = n => String(n).padStart(2, '0');
     const stamp = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}-${p2(d.getMinutes())}`, name = `${safeName()} ${stamp}`; // local time, sorts by name
-    for (const [ext, body] of [['.fountain', S.script], ['.slate.json', data]]) {
+    for (const [ext, body] of [['.fountain', S.script], ['.slate.json', full]]) {
       const w = await (await backupDir.getFileHandle(name + ext, {create: true})).createWritable();
       await w.write(body); await w.close();
     }
     // Keep the 20 newest backups of this project.
     const mine = [];
-    for await (const [n] of backupDir.entries()) if (n.startsWith(safeName() + ' ') && n.endsWith('.slate.json')) mine.push(n);
+    for await (const [n] of backupDir.entries()) if (isBackupOf(safeName(), n)) mine.push(n);
     mine.sort().slice(0, -20).forEach(n => { backupDir.removeEntry(n).catch(() => {}); backupDir.removeEntry(n.replace('.slate.json', '.fountain')).catch(() => {}); });
     lastBackup = data; backupAt = new Date(); backupUI('granted');
   } catch (err) { toast('Auto-backup failed: ' + err.message); }
@@ -2502,7 +2519,7 @@ const tabs = {
       <div class="bdgrid">${ELEMENTS.map(([k, l]) => `<label>${l}${fld('scenes', s, k)}</label>`).join('')}</div></section>`).join('');
     const report = ELEMENTS.map(([k, l]) => {
       const m = new Map();
-      for (const s of scenes) for (const x of String(s[k] || '').split(',').map(x => x.trim()).filter(Boolean)) {
+      for (const s of scenes) for (const x of tagList(s[k])) {
         const key = x.toLowerCase();
         if (!m.has(key)) m.set(key, {name: x, sc: []});
         m.get(key).sc.push(s.num);
@@ -2701,7 +2718,6 @@ document.addEventListener('input', e => {
   if (t.dataset.syn || t.dataset.arc || t.id === 'notecat' || t.dataset.snapscene !== undefined || ['bonenew', 'altnew', 'snapname'].includes(t.id)) return;
   if (t.id === 'wm') { V.wm = t.value; return document.querySelectorAll('.page').forEach(p => { if (t.value) p.dataset.wm = t.value; else delete p.dataset.wm; }); }
   if (t.id === 'title') { S.title = t.value; return save(); }
-  if (t.id === 'script') { S.script = t.value; return save(); }
   if (t.id === 'csday') { csDay = t.value; return render(); }
   if (t.matches('td textarea')) fit(t);
   const {c, i, k} = t.dataset, it = c && S[c].find(x => x.id === i);
@@ -2751,13 +2767,29 @@ document.addEventListener('change', e => {
 });
 
 // Pages per scene come from the formatted layout, in eighths.
+const sceneSig = x => `${x.ie}|${x.loc}|${x.tod}`;
+const textHash = t => { let h = 0; for (let i = 0; i < t.length; i++) h = h * 31 + t.charCodeAt(i) | 0; return h; };
+// Work a person did on a scene: anything here means a row is kept even after its scene leaves the script.
+const sceneHasWork = s => s.day || s.desc || s.refs?.length || s.block || S.shots.some(x => x.scene === s.id)
+  || ELEMENTS.some(([k]) => tagList(s[k]).some(x => !(s.autoEl?.[k] || []).some(a => sameTag(a, x))));
+// Numbers shift when scenes are added or moved, so each scene finds its row by what it says, and the number only as a last resort.
 function buildScenes() {
-  const found = parseScript(S.script), rows = {};
-  formatScript(S.script).forEach(e => { if (e.scene) rows[e.scene] = (rows[e.scene] || 0) + e.rows; });
+  const found = parseScript(S.script), rows = sceneRows(), free = new Set(S.scenes), mine = new Map();
+  found.forEach(h => h.hash = textHash(h.text.slice(1).join('\n')));
+  [(h, s) => sceneSig(s) === sceneSig(h) && s.hash === h.hash, (h, s) => sceneSig(s) === sceneSig(h) && String(s.num) === h.num,
+    (h, s) => sceneSig(s) === sceneSig(h), (h, s) => String(s.num) === h.num].forEach(same => found.forEach(h => {
+    if (mine.has(h)) return;
+    const s = [...free].find(x => same(h, x));
+    if (s) { mine.set(h, s); free.delete(s); }
+  }));
+  // Rows without a hash were added by hand, so they stay. Others left the script: drop them, or set them aside if they hold work.
+  const gone = [...free].filter(s => s.hash !== undefined), nums = new Set(found.map(h => h.num));
+  S.scenes = S.scenes.filter(s => !gone.includes(s) || sceneHasWork(s));
+  gone.forEach(s => { while (nums.has(String(s.num))) s.num = s.num + ' cut'; nums.add(String(s.num)); });
   for (const h of found) {
-    const pages = Math.max(1, Math.round((rows[h.num] || 1) / PER_PAGE * 8)), s = S.scenes.find(x => String(x.num) === h.num);
-    if (s) Object.assign(s, {ie: h.ie, loc: h.loc, tod: h.tod, pages});
-    else S.scenes.push({id: uid(), num: h.num, ie: h.ie, loc: h.loc, tod: h.tod, desc: '', pages, cast: '', day: null});
+    const pages = Math.max(1, Math.round((rows[h.num] || 1) / PER_PAGE * 8)), s = mine.get(h), facts = {num: h.num, ie: h.ie, loc: h.loc, tod: h.tod, pages, hash: h.hash};
+    if (s) Object.assign(s, facts);
+    else S.scenes.push({id: uid(), ...facts, desc: '', cast: '', day: null});
   }
   return found.length;
 }
@@ -2777,8 +2809,8 @@ function tagItem(s, k, text) {
     s.cast = [...castOf(s), p.num].join(', ');
     return true;
   }
-  const items = String(s[k] || '').split(',').map(x => x.trim()).filter(Boolean);
-  if (items.some(x => x.toLowerCase() === text.toLowerCase())) return false;
+  const items = tagList(s[k]);
+  if (items.some(x => sameTag(x, text))) return false;
   s[k] = [...items, text].join(', ');
   return true;
 }
@@ -2887,11 +2919,11 @@ const actions = {
     buildScenes();
     // Write every scene number into its heading so numbering can't shift later.
     const heads = parseScript(S.script);
+    const all = S.script.split(/\r?\n/), cls = classify(all); // classify, so headings parked in the boneyard don't count
     let hi = 0;
-    S.script = S.script.split(/\r?\n/).map(l => {
-      const t = l.trim();
-      if (!isHeadingLine(t)) return l;
-      const h = heads[hi++];
+    S.script = all.map((l, i) => {
+      if (cls[i].type !== 'scene') return l;
+      const t = l.trim(), h = heads[hi++];
       return /#[\w.-]+#$/.test(t) || /^\d/.test(t) ? l : `${l.trimEnd()} #${h.num}#`;
     }).join('\n');
     const pages = layout(), lines = S.script.split(/\r?\n/);
@@ -2926,7 +2958,8 @@ const actions = {
     speak(line, p?.voice, p?.pitch || 1);
     return false;
   },
-  printsides: () => {
+  printsides: b => {
+    if (b.dataset.all) V.sidesFor = '';
     if (!buildSides()) { toast('No one has any lines yet.'); return false; }
     document.body.classList.add('printsides');
     addEventListener('afterprint', () => { document.body.classList.remove('printsides'); $('#sides').innerHTML = ''; }, {once: true});
@@ -3167,14 +3200,7 @@ const actions = {
   print: () => (window.print(), false),
   export: () => {
     (async () => {
-      // Backups carry the storyboard images too, so one file restores everything.
-      const images = {};
-      const ids = [...S.shots.map(s => s.img), ...S.scenes.flatMap(s => s.refs || [])].filter(Boolean);
-      for (const id of ids) { try { images[id] = await imgGet(id); } catch {} }
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([JSON.stringify({...S, images})], {type: 'application/json'}));
-      a.download = (S.title || 'project').replace(/[^\w -]/g, '') + '.json';
-      a.click();
+      download(safeName() + '.json', 'application/json', await projectBackup());
       toast(`Backup of "${S.title}" downloaded`);
     })();
     return false;
@@ -3193,23 +3219,36 @@ document.addEventListener('click', e => {
   if (r !== false) { save(); render(); }
 });
 
+// Ids and strip colours go into the page unescaped, and a backup can come from anyone, so they must be plain.
+function backupIsSafe(d) {
+  const list = k => Array.isArray(d[k]) ? d[k] : [];
+  const ids = [...['scenes', 'shots', 'days', 'people', 'locs', 'av', 'bone', 'snaps'].flatMap(k => list(k).map(x => x?.id)),
+    ...list('scenes').map(s => s?.day), ...list('shots').map(s => s?.scene), ...list('days').map(x => x?.locId), ...list('av').map(r => r?.shot)];
+  return ids.every(v => v == null || v === '' || /^[\w:-]+$/.test(v)) && Object.values(d.strips || {}).every(c => /^#[0-9a-f]{6}$/i.test(c));
+}
 // A restored backup becomes a new project, so importing never overwrites anything.
+async function importBackup(text) {
+  const data = JSON.parse(text);
+  if (!['scenes', 'shots', 'days', 'people'].every(k => Array.isArray(data[k]))) throw new Error('not a Slate backup');
+  if (!backupIsSafe(data)) throw new Error('this file has been tampered with or damaged, so it was not opened');
+  const images = data.images || {};
+  delete data.images;
+  const restore = async old => { if (!images[old]) return null; const id = uid(); try { await imgPut(id, images[old]); return id; } catch { return null; } };
+  for (const sh of data.shots) { const id = sh.img && await restore(sh.img); if (id) sh.img = id; else delete sh.img; }
+  for (const s of data.scenes) s.refs = (await Promise.all((s.refs || []).map(restore))).filter(Boolean);
+  // Snapshot text gets new keys too. A snapshot whose text isn't in the file can't be used, so it isn't listed.
+  const snaps = [];
+  for (const s of data.snaps || []) { const text = images['snap:' + s.id]; if (text == null) continue; const id = uid(); await imgPut('snap:' + id, text); snaps.push({...s, id}); }
+  data.snaps = snaps;
+  data.id = uid();
+  projects.push({id: data.id, title: data.title});
+  S = Object.assign(blank(), data); tab = 'home'; persist(); resetHistory(); render();
+  toast(`Imported "${S.title}" as a new project`);
+}
 document.getElementById('file').addEventListener('change', async e => {
   const f = e.target.files[0]; e.target.value = '';
   if (!f) return;
-  try {
-    const data = JSON.parse(await f.text());
-    if (!['scenes', 'shots', 'days', 'people'].every(k => Array.isArray(data[k]))) throw new Error('not a Slate backup');
-    const images = data.images || {};
-    delete data.images;
-    const restore = async old => { if (!images[old]) return null; const id = uid(); try { await imgPut(id, images[old]); return id; } catch { return null; } };
-    for (const sh of data.shots) { const id = sh.img && await restore(sh.img); if (id) sh.img = id; else delete sh.img; }
-    for (const s of data.scenes) s.refs = (await Promise.all((s.refs || []).map(restore))).filter(Boolean);
-    data.id = uid();
-    projects.push({id: data.id, title: data.title});
-    S = Object.assign(blank(), data); tab = 'home'; persist(); resetHistory(); render();
-    toast(`Imported "${S.title}" as a new project`);
-  } catch (err) { alert('Could not import: ' + err.message); }
+  try { await importBackup(await f.text()); } catch (err) { alert('Could not import: ' + err.message); }
 });
 
 // One path for picked, dropped and pasted images. target: {t: 'shot' | 'ref', i: id}

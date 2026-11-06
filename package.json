@@ -7,6 +7,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "test": "electron test.js",
     "dist": "electron-builder --win"
   },
   "build": {
