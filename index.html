@@ -213,6 +213,24 @@ table.rep{min-width:0;max-width:640px}
 .rhcard textarea{width:100%}
 .rhnav{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap;margin-top:var(--s3)}
 @media(max-width:1000px){.rh{grid-template-columns:minmax(0,1fr)}}
+#sides{display:none}
+@media print{body.printsides .app,body.printsides #toasts{display:none!important}body.printsides #sides{display:block}}
+.sides{break-after:page;color:#111;font:12pt/1.35 var(--mono)}
+.sides:last-child{break-after:auto}
+.sides h2{font-size:20pt;margin:0}
+.sides h3{font-size:12pt;margin:18pt 0 6pt;padding-top:6pt;border-top:1px solid #999;break-after:avoid}
+.sides header p,.sdroom{font-size:10pt;margin:2pt 0}
+.sides table{border-collapse:collapse;width:100%;margin:8pt 0;font-size:10pt}
+.sides th,.sides td{color:#111;text-align:left;border-bottom:1px solid #bbb;padding:2pt 6pt 2pt 0}
+.sd{margin:0 0 7pt;padding-left:26pt;position:relative;break-inside:avoid}
+.sd b{display:block}
+.sd i{display:block;font-style:normal}
+.sd p{margin:0}
+.sd small{display:block;font-size:9.5pt}
+.sd.me{border-left:4pt solid #111;background:#eee;font-weight:700;padding:3pt 4pt 3pt 22pt;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+.sdn{position:absolute;left:3pt;top:3pt;font-size:9pt}
+.sdshot{font-size:9.5pt;margin:0 0 3pt;padding-left:26pt}
+.sdlines{display:block;height:17pt;border-bottom:1px solid #777}
 .frame figcaption{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap;padding-top:var(--s1)}
 .frame figcaption input{flex:1;min-width:120px;background:transparent;border-color:transparent}
 .thumb{width:96px;aspect-ratio:16/9;object-fit:cover;display:block;margin-top:var(--s1);border-radius:2px}
@@ -481,6 +499,7 @@ body.dark-ed .b.k-section{color:var(--chalk)}
 </style>
 </head>
 <body>
+<div id="sides"></div>
 <div class="app">
 <aside class="side">
   <div class="brand" role="img" aria-label="slate">
@@ -1846,9 +1865,9 @@ function sizeSketch(size, people = 1) {
 }
 /* ───────────── Rehearsal walk-through ───────────── */
 // A scene as a list of beats: one per action line or speech.
-function sceneBeats(s) {
+function sceneBeats(s, els = formatScript(S.script)) {
   const out = []; let who = null, paren = '';
-  formatScript(S.script).filter(e => e.scene === String(s.num)).flatMap(e => e.parts ? e.parts.flat() : [e]).forEach(e => {
+  els.filter(e => e.scene === String(s.num)).flatMap(e => e.parts ? e.parts.flat() : [e]).forEach(e => {
     const text = plain(e.text).trim();
     if (e.type === 'char') { who = text.replace(/\s*\(.*?\)\s*/g, '').replace(/\^/, '').trim().toUpperCase(); paren = ''; }
     else if (e.type === 'paren') paren = text;
@@ -1881,6 +1900,43 @@ function rhStage() {
       <div class="rhbeat">${b.who ? `<b>${esc(b.who)}</b>` : ''}${b.paren ? `<i>${esc(b.paren)}</i>` : ''}${hide ? '<span class="muted">Your line. Say it, then press Show my line to check.</span>' : esc(b.text)}</div>
       <label>Blocking and notes for this line<textarea id="rhnote" rows="3" placeholder="Where people stand, move and look">${esc(s.block?.[beatKey(b)] || '')}</textarea></label>
       <div class="rhnav"><button data-act="rhgo" data-v="-1" ${step ? '' : 'disabled'}>Back</button><button class="primary" data-act="rhgo" data-v="1">${hide ? 'Show my line' : 'Next'}</button><span class="muted">Line ${step + 1} of ${beats.length} · ← → keys work too</span></div></div></div>`;
+}
+/* ───────────── Printed lines: one packet per person ───────────── */
+const SIDE_MODES = [['read', 'Table read: whole scenes'], ['rehearse', 'Rehearsal: blocking, props, room for notes'], ['short', 'Just their lines and cues']];
+function sideScenes() {
+  const els = formatScript(S.script);
+  return [...S.scenes].sort(byNum).map(s => ({s, beats: sceneBeats(s, els)}));
+}
+// Everyone who speaks, biggest part first.
+function sideNames(scenes) {
+  const n = new Map();
+  scenes.forEach(({beats}) => beats.forEach(b => b.who && n.set(b.who, (n.get(b.who) || 0) + 1)));
+  return [...n.keys()].sort((a, b) => n.get(b) - n.get(a));
+}
+function sidePacket(name, scenes, mode) {
+  const mine = scenes.filter(x => x.beats.some(b => b.who === name)), count = x => x.beats.filter(b => b.who === name).length;
+  const total = mine.reduce((a, x) => a + count(x), 0), actor = S.people.find(p => p.type === 'cast' && String(p.role).toUpperCase() === name)?.name, act = actionByScene();
+  let n = 0;
+  const body = mine.map(x => {
+    const {s, beats} = x, shots = mode === 'rehearse' ? rhShots(s, beats) : [];
+    const cast = castOf(s).map(c => castName(c) || '#' + c).join(', '), props = tagList(s.props).join(', '), risk = sceneFlags(s, act.get(String(s.num))).join(', ');
+    const room = mode === 'rehearse' ? [cast && `In the room: ${cast}`, props && `Props: ${props}`, risk && `Safety: ${risk}`].filter(Boolean).map(l => `<p class="sdroom">${esc(l)}</p>`).join('') : '';
+    return `<section><h3>${esc(s.num)} ${esc(heading(s))}</h3>${room}${beats.map((b, i) => {
+      const me = b.who === name, note = mode === 'rehearse' && s.block?.[beatKey(b)];
+      if (mode === 'short' && !me && beats[i + 1]?.who !== name) return '';
+      return `${shots.filter(y => y.at === i).map(y => `<p class="sdshot">Shot ${esc(y.sh.num)} ${esc(y.sh.size)}${y.sh.desc ? ': ' + esc(y.sh.desc) : ''}</p>`).join('')}
+        <div class="sd${me ? ' me' : ''}">${me ? `<span class="sdn">${++n}</span>` : ''}${b.who ? `<b>${esc(b.who)}</b>` : ''}${b.paren ? `<i>${esc(b.paren)}</i>` : ''}<p>${esc(b.text)}</p>${note ? `<small>Blocking: ${esc(note)}</small>` : ''}${me && mode === 'rehearse' ? '<span class="sdlines"></span><span class="sdlines"></span>' : ''}</div>`;
+    }).join('')}</section>`;
+  }).join('');
+  return `<article class="sides"><header><h2>${esc(name)}</h2><p>${esc(S.title)}${actor ? ` · Played by ${esc(actor)}` : ''} · ${SIDE_MODES.find(m => m[0] === mode)[1].split(':')[0]} · Printed ${today()}</p>
+    <p>${total} line${total === 1 ? '' : 's'} in ${mine.length} scene${mine.length === 1 ? '' : 's'}. Your lines are shaded and numbered.</p></header>
+    <table><tr><th>Scene</th><th>Where</th><th>Your lines</th></tr>${mine.map(x => `<tr><td>${esc(x.s.num)}</td><td>${esc(heading(x.s))}</td><td>${count(x)}</td></tr>`).join('')}</table>${body}</article>`;
+}
+// One packet per person, each starting on a new page, so a stack can be handed round.
+function buildSides() {
+  const scenes = sideScenes(), names = V.sidesFor ? [V.sidesFor] : sideNames(scenes), mode = V.sidesMode || 'read';
+  $('#sides').innerHTML = names.filter(n => scenes.some(x => x.beats.some(b => b.who === n))).map(n => sidePacket(n, scenes, mode)).join('');
+  return $('#sides').children.length;
 }
 const rhDraw = () => { const el = $('#rh'); if (el) { el.innerHTML = rhStage(); hydrate(); } };
 let rhSay = null, rhTalking = false;
@@ -1937,7 +1993,7 @@ function writeView() {
         <button data-act="park">Move selection to boneyard</button><button data-act="read" id="readbtn">Table read</button>
         <label class="tgl">Voices <select id="tts" aria-label="Table read voices"><option value="system">System</option><option value="natural" ${V.tts === 'natural' ? 'selected' : ''}>Natural (one-time download)</option></select></label>
         <label class="tgl">Reading speed <select id="rate" aria-label="Table read speed">${[[0.85, 'Slow'], [1, 'Normal'], [1.15, 'Brisk'], [1.3, 'Fast']].map(([v, l]) => `<option value="${v}" ${(V.rate || 1) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-        <button data-act="ref" data-v="chars">Choose voices…</button>
+        <button data-act="ref" data-v="chars">Choose voices…</button><button data-act="printsides" title="A packet of each person's lines. Choose the type under Shots, Rehearse">Print everyone's lines</button>
         <button data-act="autotag">Auto-tag all scenes</button><button data-act="cleartags">Clear all tags</button>
         <button data-act="find">Find &amp; replace (Ctrl+F)</button><button data-act="view" data-k="script" data-v="pages">Tag on the printed pages</button><button data-act="parse">Rebuild scenes list now</button>`)}
       ${menu('right', 'Lock &amp; Revisions', TICON.lock, L
@@ -2467,7 +2523,10 @@ const tabs = {
       const cur = rhScene(), parts = cur ? [...new Set(sceneBeats(cur).map(b => b.who).filter(Boolean))] : [];
       return `<div class="bar">${modes}<label class="tgl">Scene <select id="rhscene">${scenes.map(s => `<option value="${s.id}" ${s === cur ? 'selected' : ''}>${esc(s.num)} ${esc(heading(s))}</option>`).join('')}</select></label>
         <label class="tgl">Rehearsing as <select id="rhas"><option value="">Everyone (show all lines)</option>${parts.map(n => `<option ${n === V.rhAs ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
-        <button data-act="rhread" id="rhread" ${cur ? '' : 'disabled'}>${rhSay ? 'Stop reading' : 'Read the other parts'}</button></div><div id="rh">${rhStage()}</div>`;
+        <button data-act="rhread" id="rhread" ${cur ? '' : 'disabled'}>${rhSay ? 'Stop reading' : 'Read the other parts'}</button></div>
+        <div class="bar"><label class="tgl">Print lines for <select id="sidesfor"><option value="">Everyone (a packet each)</option>${sideNames(sideScenes()).map(n => `<option ${n === V.sidesFor ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
+        <select id="sidesmode" aria-label="Packet type">${SIDE_MODES.map(([v, l]) => `<option value="${v}" ${v === (V.sidesMode || 'read') ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <button data-act="printsides">Print lines</button></div><div id="rh">${rhStage()}</div>`;
     }
     const head = `<div class="bar"><button class="primary" data-act="add-shot" ${scenes.length ? '' : 'disabled'}>Add shot</button>
       ${modes}
@@ -2613,6 +2672,8 @@ document.addEventListener('input', e => {
   if (t.id === 'ed') { autoFormat(); commitEd(); edSuggest(); typewriter(); return; }
   if (t.id === 'rate') { V.rate = +t.value; return; }
   if (t.id === 'tts') { V.tts = t.value; try { localStorage.setItem('slate-tts', t.value); } catch {} return updateRefPane(); }
+  if (t.id === 'sidesfor') { V.sidesFor = t.value; return; }
+  if (t.id === 'sidesmode') { V.sidesMode = t.value; return; }
   if (t.id === 'rhscene') { stopRead(); V.rhScene = t.value; V.rhStep = 0; V.rhAs = ''; V.rhShow = false; return render(); }
   if (t.id === 'rhas') { V.rhAs = t.value; V.rhShow = false; return rhDraw(); }
   if (t.id === 'rhshot') { const s = rhScene(), b = sceneBeats(s)[V.rhStep], sh = S.shots.find(x => x.id === t.value); sh.cue = beatKey(b); save(); return rhDraw(); }
@@ -2863,6 +2924,13 @@ const actions = {
     }
     const p = voicePlan().plan.get(n);
     speak(line, p?.voice, p?.pitch || 1);
+    return false;
+  },
+  printsides: () => {
+    if (!buildSides()) { toast('No one has any lines yet.'); return false; }
+    document.body.classList.add('printsides');
+    addEventListener('afterprint', () => { document.body.classList.remove('printsides'); $('#sides').innerHTML = ''; }, {once: true});
+    window.print();
     return false;
   },
   rhgo: b => { rhMove(+b.dataset.v); return false; },
