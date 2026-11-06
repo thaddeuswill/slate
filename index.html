@@ -195,7 +195,24 @@ table.rep{min-width:0;max-width:640px}
   background:linear-gradient(90deg,#0000 calc(33.33% - .5px),#fffb 0 calc(33.33% + .5px),#0000 0 calc(66.67% - .5px),#fffb 0 calc(66.67% + .5px),#0000 0),
   linear-gradient(#0000 calc(33.33% - .5px),#fffb 0 calc(33.33% + .5px),#0000 0 calc(66.67% - .5px),#fffb 0 calc(66.67% + .5px),#0000 0)}
 .frame img,.frame .ph{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:8px;background:#eceef2}
-.frame .ph{border:1px dashed var(--line);color:var(--muted)}
+.frame .ph{border:1px dashed var(--line);color:var(--muted);position:relative;overflow:hidden}
+.ph .sketch{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.ph span{position:relative;background:#eceef2cc;padding:2px var(--s2);border-radius:6px}
+.sketch{color:var(--muted);display:block}
+.tip{flex-basis:100%;font-size:var(--fs-1)}
+.rh{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--s3);align-items:start}
+.rhcard{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:var(--s3)}
+.rhroom{margin:0 0 var(--s3)}
+.rhframe{margin:0}
+.rhframe img,.rhframe .sketch{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:8px;background:#eceef2}
+.rhframe figcaption{padding:var(--s2) 0}
+.rhcue{font-family:var(--mono);color:var(--muted);margin:0 0 var(--s3)}
+.rhbeat{font-family:var(--mono);font-size:var(--fs-5);line-height:1.4;margin:0 0 var(--s3);min-height:4em}
+.rhbeat b{display:block;font-size:var(--fs-4)}
+.rhbeat i{display:block;font-size:var(--fs-4);font-style:normal;color:var(--muted)}
+.rhcard textarea{width:100%}
+.rhnav{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap;margin-top:var(--s3)}
+@media(max-width:1000px){.rh{grid-template-columns:minmax(0,1fr)}}
 .frame figcaption{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap;padding-top:var(--s1)}
 .frame figcaption input{flex:1;min-width:120px;background:transparent;border-color:transparent}
 .thumb{width:96px;aspect-ratio:16/9;object-fit:cover;display:block;margin-top:var(--s1);border-radius:2px}
@@ -1765,10 +1782,18 @@ function kokoroSayer(tts, queue) {
     });
   };
 }
+// Natural voices if chosen and they load, otherwise the system's. Null if the read was stopped while loading.
+async function getSayer(queue, token) {
+  if (V.tts === 'natural') {
+    try { if (!kokoro) toast('Getting natural voices ready. The first time downloads about 90 MB, so give it a minute.'); const tts = await loadKokoro(); return reading === token ? kokoroSayer(tts, queue) : null; }
+    catch (e) { console.warn(e); toast("Couldn't load the natural voices, so this read uses your system voices. The first download needs an internet connection."); }
+    if (reading !== token) return null;
+  }
+  return systemSayer();
+}
 async function tableRead() {
   if (reading) return stopRead();
-  let natural = V.tts === 'natural';
-  if (!natural && !('speechSynthesis' in window)) return toast("This browser can't read aloud");
+  if (V.tts !== 'natural' && !('speechSynthesis' in window)) return toast("This browser can't read aloud");
   const kids = [...$('#ed').children], queue = [];
   let speaker = null;
   kids.slice(Math.max(0, kids.indexOf(edCur))).forEach(el => {
@@ -1781,13 +1806,8 @@ async function tableRead() {
   });
   const token = reading = {}, btn = $('#readbtn');
   if (btn) btn.textContent = 'Stop reading';
-  let tts = null;
-  if (natural) {
-    try { if (!kokoro) toast('Getting natural voices ready. The first time downloads about 90 MB, so give it a minute.'); tts = await loadKokoro(); }
-    catch (e) { console.warn(e); natural = false; toast("Couldn't load the natural voices, so this read uses your system voices. The first download needs an internet connection."); }
-    if (reading !== token) return;
-  }
-  const say = natural ? kokoroSayer(tts, queue) : systemSayer();
+  const say = await getSayer(queue, token);
+  if (!say) return;
   try {
     for (let q = 0; q < queue.length && reading === token; q++) {
       kids.forEach(k => k.classList.remove('reading')); queue[q].el.classList.add('reading'); queue[q].el.scrollIntoView({block: 'center'});
@@ -1802,6 +1822,95 @@ function stopRead() {
   if (curAudio) { curAudio.pause(); curAudio = null; }
   document.querySelectorAll('.reading').forEach(k => k.classList.remove('reading'));
   const btn = $('#readbtn'); if (btn) btn.textContent = 'Table read';
+  rhSay = null;
+  const rb = $('#rhread'); if (rb) rb.textContent = 'Read the other parts';
+}
+/* ───────────── Storyboard help ───────────── */
+// What each shot size shows: how big a person sits in the frame (0 = no person), and what to draw.
+const SIZES = [[/^(EWS|EXTREME WIDE|ESTAB)/i, .22, 'Place us: the whole location, people tiny in it.'],
+  [/^(WS|WIDE|FULL|MASTER|LS)/i, .5, 'Whole bodies and the space around them. Show where everyone stands.'],
+  [/^(ECU|EXTREME CLOSE)/i, 3.2, 'One detail fills the frame: eyes, a hand, an object.'],
+  [/^(MCU|MEDIUM CLOSE)/i, 1.5, 'Chest up. Keep the eyes on the upper third line.'],
+  [/^(CU|CLOSE)/i, 2.2, 'The face fills the frame. Draw the expression.'],
+  [/^(OTS|OVER)/i, 1.3, 'A shoulder in the foreground, the other face beyond it.'],
+  [/^POV/i, 0, 'What the character sees, drawn from their eye line.'],
+  [/^INSERT/i, 0, 'The object alone, big and clear.']];
+const sizeHelp = size => { const m = SIZES.find(([re]) => re.test(String(size || '').trim())); return m ? {scale: m[1], tip: m[2]} : {scale: 1, tip: 'Waist up, with room for gestures.'}; };
+console.assert(sizeHelp('ECU').scale === 3.2 && sizeHelp('MCU').scale === 1.5 && sizeHelp('CU').scale === 2.2 && sizeHelp('EWS').scale === .22 && sizeHelp('').scale === 1, 'sizeHelp');
+// A stand-in frame: figures at the right size on the thirds, so an undrawn board still reads.
+function sizeSketch(size, people = 1) {
+  const {scale} = sizeHelp(size), n = scale > 1.6 ? 1 : Math.min(3, Math.max(1, people)), r = 11 * scale, wide = scale < .8, y = wide ? 50 : 30;
+  const fig = i => { const x = 160 * (i + 1) / (n + 1); return `<circle cx="${x}" cy="${y}" r="${r}"/><rect x="${x - r * 1.7}" y="${y + r * 1.15}" width="${r * 3.4}" height="${wide ? r * 5 : 90}" rx="${r * .9}"/>`; };
+  return `<svg class="sketch" viewBox="0 0 160 90" aria-hidden="true"><path d="M53 0v90M107 0v90M0 30h160M0 60h160" stroke="currentColor" stroke-opacity=".25" stroke-dasharray="2 2" fill="none"/>
+    <g fill="currentColor" fill-opacity=".3">${scale ? Array.from({length: n}, (_, i) => fig(i)).join('') : '<rect x="53" y="30" width="54" height="30" rx="4"/>'}</g></svg>`;
+}
+/* ───────────── Rehearsal walk-through ───────────── */
+// A scene as a list of beats: one per action line or speech.
+function sceneBeats(s) {
+  const out = []; let who = null, paren = '';
+  formatScript(S.script).filter(e => e.scene === String(s.num)).flatMap(e => e.parts ? e.parts.flat() : [e]).forEach(e => {
+    const text = plain(e.text).trim();
+    if (e.type === 'char') { who = text.replace(/\s*\(.*?\)\s*/g, '').replace(/\^/, '').trim().toUpperCase(); paren = ''; }
+    else if (e.type === 'paren') paren = text;
+    else if (e.type === 'dial') { if (text) out.push({who, paren, text}); paren = ''; }
+    else if (['action', 'center', 'lyric'].includes(e.type) && text) { who = null; out.push({who: null, paren: '', text}); }
+  });
+  return out;
+}
+// shortcut: notes and shot cues key on a beat's words, so identical lines share them and rewording a line loses its note; give beats ids if that bites.
+const beatKey = b => `${b.who || ''}|${b.text}`.slice(0, 120);
+// Which beat each shot starts on: where you put it, otherwise spread evenly through the scene.
+function rhShots(s, beats) {
+  const list = S.shots.filter(x => x.scene === s.id).sort(byNum);
+  return list.map((sh, i) => { const at = beats.findIndex(b => beatKey(b) === sh.cue); return {sh, at: at >= 0 ? at : Math.floor(i * beats.length / list.length)}; }).sort((a, b) => a.at - b.at);
+}
+const rhScene = () => S.scenes.find(s => s.id === V.rhScene) || [...S.scenes].sort(byNum)[0];
+function rhStage() {
+  const s = rhScene();
+  if (!s) return '<p class="empty">No scenes yet. Build them from the script first.</p>';
+  const beats = sceneBeats(s);
+  if (!beats.length) return '<p class="empty">This scene has no script text yet.</p>';
+  const step = V.rhStep = Math.min(V.rhStep || 0, beats.length - 1), b = beats[step], prev = beats[step - 1], shots = rhShots(s, beats);
+  const sh = shots.filter(x => x.at <= step).pop()?.sh || shots[0]?.sh, hide = b.who && b.who === V.rhAs && !V.rhShow;
+  const cast = castOf(s).map(n => castName(n) || '#' + n).join(', '), props = tagList(s.props).join(', ');
+  return `<p class="muted rhroom">${esc(heading(s))}${cast ? ` · In the room: ${esc(cast)}` : ''}${props ? ` · Props: ${esc(props)}` : ''}</p>${flagsHtml(sceneFlags(s, actionByScene().get(String(s.num))))}
+    <div class="rh"><div class="rhcard"><figure class="rhframe">${sh?.img ? `<span class="fimg"><img data-img="${sh.img}" alt="Frame for shot ${esc(sh.num)}"><i class="guide"></i></span>` : sizeSketch(sh?.size, castOf(s).length)}
+      <figcaption>${sh ? `<b class="mono">Shot ${esc(sh.num)}</b> ${esc([sh.size, sh.angle, sh.move, sh.lens].filter(Boolean).join(' · '))}<br>${esc(sh.desc)}` : '<span class="muted">No shots in this scene yet. Add some on the Shots list to see them here.</span>'}</figcaption></figure>
+      ${shots.length ? `<label class="tgl">Shot on this line <select id="rhshot">${shots.map(x => `<option value="${x.sh.id}" ${x.sh === sh ? 'selected' : ''}>Shot ${esc(x.sh.num)} ${esc(x.sh.size)}</option>`).join('')}</select></label>` : ''}</div>
+    <div class="rhcard">${prev ? `<p class="rhcue">${prev.who ? esc(prev.who) + ': ' : ''}${esc(prev.text)}</p>` : ''}
+      <div class="rhbeat">${b.who ? `<b>${esc(b.who)}</b>` : ''}${b.paren ? `<i>${esc(b.paren)}</i>` : ''}${hide ? '<span class="muted">Your line. Say it, then press Show my line to check.</span>' : esc(b.text)}</div>
+      <label>Blocking and notes for this line<textarea id="rhnote" rows="3" placeholder="Where people stand, move and look">${esc(s.block?.[beatKey(b)] || '')}</textarea></label>
+      <div class="rhnav"><button data-act="rhgo" data-v="-1" ${step ? '' : 'disabled'}>Back</button><button class="primary" data-act="rhgo" data-v="1">${hide ? 'Show my line' : 'Next'}</button><span class="muted">Line ${step + 1} of ${beats.length} · ← → keys work too</span></div></div></div>`;
+}
+const rhDraw = () => { const el = $('#rh'); if (el) { el.innerHTML = rhStage(); hydrate(); } };
+let rhSay = null, rhTalking = false;
+function rhMove(d) {
+  const s = rhScene(), beats = s ? sceneBeats(s) : [], b = beats[V.rhStep || 0];
+  if (!b) return;
+  if (rhTalking) stopRead(); // moving by hand takes over from the voices
+  if (d > 0 && b.who && b.who === V.rhAs && !V.rhShow) { V.rhShow = true; return rhDraw(); }
+  const to = (V.rhStep || 0) + d;
+  if (to >= beats.length) { stopRead(); return toast('End of the scene'); }
+  if (to < 0) return;
+  V.rhStep = to; V.rhShow = false; rhDraw();
+  if (rhSay) d > 0 ? rhLoop() : stopRead();
+}
+// Reads everything but your part, and waits for you at each of your lines.
+async function rhLoop() {
+  const token = reading, say = rhSay, beats = sceneBeats(rhScene());
+  rhTalking = true;
+  try {
+    while (reading === token && $('#rh')) {
+      const b = beats[V.rhStep];
+      if (b.who && b.who === V.rhAs) return;
+      await say(b, V.rhStep);
+      if (reading !== token) return;
+      if (V.rhStep >= beats.length - 1) { stopRead(); return toast('End of the scene'); }
+      V.rhStep++; V.rhShow = false; rhDraw();
+    }
+    if (reading === token) stopRead(); // left the walk-through
+  } catch (e) { console.warn(e); stopRead(); toast('The read stopped: ' + (e.message || e)); }
+  finally { rhTalking = false; }
 }
 
 const PALETTE = [['scene', 'Scene Heading', 1], ['char', 'Character', 3], ['dial', 'Dialogue', 5], ['action', 'Action', 2], ['paren', 'Parenthetical', 4], ['trans', 'Transition', 6], ['lyric', 'Lyrics', 10]];
@@ -2353,8 +2462,15 @@ const tabs = {
     const scenes = [...S.scenes].sort(byNum), num = id => S.scenes.find(s => s.id === id)?.num ?? '';
     const shown = focus.size ? scenes.filter(s => focus.has(s.id)) : scenes, ids = new Set(shown.map(s => s.id));
     const shots = S.shots.filter(sh => ids.has(sh.scene)).sort((a, b) => byNum({num: num(a.scene)}, {num: num(b.scene)}) || byNum(a, b));
+    const modes = seg('shots', [['list', 'List'], ['boards', 'Storyboard'], ['rehearse', 'Rehearse']]);
+    if (V.shots === 'rehearse') {
+      const cur = rhScene(), parts = cur ? [...new Set(sceneBeats(cur).map(b => b.who).filter(Boolean))] : [];
+      return `<div class="bar">${modes}<label class="tgl">Scene <select id="rhscene">${scenes.map(s => `<option value="${s.id}" ${s === cur ? 'selected' : ''}>${esc(s.num)} ${esc(heading(s))}</option>`).join('')}</select></label>
+        <label class="tgl">Rehearsing as <select id="rhas"><option value="">Everyone (show all lines)</option>${parts.map(n => `<option ${n === V.rhAs ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
+        <button data-act="rhread" id="rhread" ${cur ? '' : 'disabled'}>${rhSay ? 'Stop reading' : 'Read the other parts'}</button></div><div id="rh">${rhStage()}</div>`;
+    }
     const head = `<div class="bar"><button class="primary" data-act="add-shot" ${scenes.length ? '' : 'disabled'}>Add shot</button>
-      ${seg('shots', [['list', 'List'], ['boards', 'Storyboard']])}
+      ${modes}
       ${V.shots === 'boards' ? `<label class="muted">Frame size <input type="range" id="fsize" min="160" max="520" step="40" value="${V.size}" style="width:120px;vertical-align:middle"></label><span class="muted">Drop or paste images onto a frame</span>` : ''}
       <button data-act="masters" ${scenes.length ? '' : 'disabled'}>Add a master shot to empty scenes</button><button data-act="suggestshots" ${scenes.length ? '' : 'disabled'} title="A shot for every CLOSE ON, INSERT, POV, ANGLE ON… written in the action">Shots from the script</button>
       ${V.shots === 'boards' ? `<label class="tgl"><input type="checkbox" data-ui="guides" ${V.guides ? 'checked' : ''}> Framing guides</label>` : ''}<button data-act="print">Print</button>
@@ -2362,10 +2478,12 @@ const tabs = {
       ${scenes.length ? `<div class="bar"><span class="muted">Focus</span>${scenes.map(s => `<button class="chip" data-act="focus" data-i="${s.id}" aria-pressed="${focus.has(s.id)}" title="${esc(heading(s))}">${esc(s.num)}</button>`).join('')}
       ${focus.size ? '<button class="link" data-act="focus" data-i="">Show all scenes</button>' : '<span class="muted">Pick scenes to work on them alone, with their script alongside.</span>'}</div>` : ''}`;
     if (V.shots === 'boards') {
-      const frame = sh => `<figure class="frame" data-shot="${sh.id}">${sh.img ? `<span class="fimg"><img data-img="${sh.img}" alt="Frame for shot ${esc(num(sh.scene))}/${esc(sh.num)}">${V.guides ? '<i class="guide"></i>' : ''}</span>` : `<button class="ph" data-act="pick" data-t="shot" data-i="${sh.id}">Add frame</button>`}
-        <figcaption><b class="mono">${esc(sh.num)}</b><span class="muted">${esc(sh.size)}</span>${fld('shots', sh, 'desc')}
+      const frame = sh => `<figure class="frame" data-shot="${sh.id}">${sh.img ? `<span class="fimg"><img data-img="${sh.img}" alt="Frame for shot ${esc(num(sh.scene))}/${esc(sh.num)}">${V.guides ? '<i class="guide"></i>' : ''}</span>` : `<button class="ph" data-act="pick" data-t="shot" data-i="${sh.id}">${sizeSketch(sh.size, castOf(S.scenes.find(s => s.id === sh.scene) || {}).length)}<span>Add frame</span></button>`}
+        <figcaption><b class="mono">${esc(sh.num)}</b><span class="muted">${esc(sh.size)}</span>${fld('shots', sh, 'desc')}${sh.img ? '' : `<span class="muted tip">${esc(sizeHelp(sh.size).tip)}</span>`}
         ${sh.img ? `<button class="link" data-act="pick" data-t="shot" data-i="${sh.id}">Replace</button><button class="link" data-act="unimg" data-i="${sh.id}">Remove</button>` : ''}</figcaption></figure>`;
-      return head + (shown.map(s => {
+      const next = shots.find(x => !x.img), bare = shown.filter(s => !S.shots.some(x => x.scene === s.id)).length;
+      const help = [shots.length ? `${shots.filter(x => x.img).length} of ${shots.length} frames added.` : '', next ? `Next up: scene ${num(next.scene)}, shot ${next.num}.` : '', bare ? `${bare} scene${bare === 1 ? ' has' : 's have'} no shots yet: try Shots from the script.` : ''].filter(Boolean).join(' ');
+      return head + (help ? `<p class="muted noprint">${esc(help)}</p>` : '') + (shown.map(s => {
         const list = shots.filter(x => x.scene === s.id);
         return `<section class="bscene"><h3 class="mono">${esc(s.num)} ${esc(heading(s))}</h3>
           <div class="refs" data-scene="${s.id}">${(s.refs || []).map(id => `<span class="ref"><img data-img="${id}" alt="Reference for scene ${esc(s.num)}"><button class="link" data-act="unref" data-i="${s.id}" data-img="${id}">Remove</button></span>`).join('')}
@@ -2495,6 +2613,10 @@ document.addEventListener('input', e => {
   if (t.id === 'ed') { autoFormat(); commitEd(); edSuggest(); typewriter(); return; }
   if (t.id === 'rate') { V.rate = +t.value; return; }
   if (t.id === 'tts') { V.tts = t.value; try { localStorage.setItem('slate-tts', t.value); } catch {} return updateRefPane(); }
+  if (t.id === 'rhscene') { stopRead(); V.rhScene = t.value; V.rhStep = 0; V.rhAs = ''; V.rhShow = false; return render(); }
+  if (t.id === 'rhas') { V.rhAs = t.value; V.rhShow = false; return rhDraw(); }
+  if (t.id === 'rhshot') { const s = rhScene(), b = sceneBeats(s)[V.rhStep], sh = S.shots.find(x => x.id === t.value); sh.cue = beatKey(b); save(); return rhDraw(); }
+  if (t.id === 'rhnote') { const s = rhScene(), b = sceneBeats(s)[V.rhStep]; s.block = {...s.block, [beatKey(b)]: t.value}; return save(); }
   if (t.dataset.merge) { const n = mergeTag(t.dataset.merge, t.dataset.from, t.value); save(); toast(`Merged “${t.dataset.from}” into “${t.value}” in ${n} scene${n === 1 ? '' : 's'}. Auto-tagging uses “${t.value}” from now on.`); return render(); }
   if (t.id === 'daytarget') { S.dayTarget = +t.value; save(); return render(); }
   if (t.id === 'minpage') { S.minPerPage = +t.value; save(); return render(); }
@@ -2741,6 +2863,16 @@ const actions = {
     }
     const p = voicePlan().plan.get(n);
     speak(line, p?.voice, p?.pitch || 1);
+    return false;
+  },
+  rhgo: b => { rhMove(+b.dataset.v); return false; },
+  rhread: b => {
+    if (reading) { stopRead(); return false; }
+    const beats = sceneBeats(rhScene());
+    if (!beats.length) return false;
+    const token = reading = {};
+    b.textContent = 'Stop reading';
+    getSayer(beats, token).then(say => { if (say && reading === token) { rhSay = say; rhLoop(); } });
     return false;
   },
   bdpanel: () => { V.ref = V.ref === 'scene' ? null : 'scene'; return 'ui'; },
@@ -3195,6 +3327,10 @@ document.addEventListener('keydown', e => {
     if (e.key === 'Escape') { V.find = false; return render(); }
   }
   if (t.closest?.('#ed') && edKey(e)) return;
+  if (tab === 'shots' && V.shots === 'rehearse' && !typing && !mod && (e.key === 'ArrowRight' || e.key === 'ArrowLeft' || (e.key === ' ' && !t.matches?.('button, summary')))) {
+    e.preventDefault();
+    return rhMove(e.key === 'ArrowLeft' ? -1 : 1);
+  }
   if (e.altKey && !mod && /^[1-8]$/.test(e.key)) {
     const k = Object.keys(tabs)[+e.key - 1];
     if (k) { e.preventDefault(); tab = k; render(); }
